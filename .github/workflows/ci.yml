@@ -1,0 +1,44 @@
+# Checks on every push. The maintainer's PC has no Go: this workflow is
+# where the code is built and tested. Every check runs even after another
+# one failed, so one run shows all the problems. Actions are pinned by
+# commit SHA; the tag is in the comment.
+name: ci
+on:
+  push:
+    branches: ['**']
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version: '1.27.x'
+          check-latest: true
+      - name: gofmt
+        run: |
+          files=$(gofmt -l .)
+          if [ -n "$files" ]; then
+            gofmt -d $files
+            echo "::error::gofmt -l lists: $files"
+            exit 1
+          fi
+      - name: go.mod and go.sum are tidy
+        if: ${{ !cancelled() }}
+        run: go mod tidy -diff
+      - name: go vet
+        if: ${{ !cancelled() }}
+        run: go vet ./...
+      - name: go test
+        if: ${{ !cancelled() }}
+        run: go test -race ./...
+      - name: hyrouterd for the routers (arm64, amd64)
+        if: ${{ !cancelled() }}
+        run: |
+          for arch in arm64 amd64; do
+            CGO_ENABLED=0 GOOS=linux GOARCH=$arch go build -trimpath -ldflags '-s -w' -o "$RUNNER_TEMP/hyrouterd-$arch" ./cmd/hyrouterd
+            ls -l "$RUNNER_TEMP/hyrouterd-$arch"
+          done

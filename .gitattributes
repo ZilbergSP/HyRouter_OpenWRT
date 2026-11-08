@@ -1,0 +1,5 @@
+# Go sources, scripts and golden files keep LF on every checkout.
+* text=auto eol=lf
+*.png binary
+*.ico binary
+*.dat binary

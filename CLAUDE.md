@@ -9,7 +9,7 @@ answer in Russian, UI text and docs are Russian.
 
 The repository is private. HyRoute (github.com/lardan099/hyroute, public,
 MIT) is the source of the copied packages; it is checked out next to this
-one at ../HyRoute.
+one at ../HyRoute. This repository lives in D:\Work\Projects\HyRoute_OpenWRT.
 
 ## Workflow
 
@@ -20,9 +20,11 @@ one at ../HyRoute.
 
 ## Code copied from HyRoute
 
-- A copied package keeps a line `// From HyRoute <commit>: <path>` in its
-  doc comment. When a fix lands in HyRoute, port it and move the commit.
+- docs/hyroute-sync.md lists every copied package, the HyRoute commit it
+  matches and how it differs. When a fix lands in HyRoute, port it
+  (`diff -r ../HyRoute/internal/<pkg> internal/<pkg>`) and update the row.
 - HyRoute's MIT notice stays in THIRD-PARTY-NOTICES.txt.
+- Module path: `github.com/zilbergsp/hyrouter` (lower case).
 
 ## Commits
 
@@ -34,10 +36,13 @@ one at ../HyRoute.
 - `gofmt -l .` prints nothing; `go vet ./...`; `go test ./...` (Linux).
 - UI changes: `cd web && npx svelte-check --threshold warning && npx vite build`;
   web/dist is committed with the change.
-- The maintainer's PC is Windows without Go (check `go version` first). Do
-  not run WSL, Docker, network or nftables tests there: it drops their
-  internet. Linux, netns and QEMU tests run in GitHub CI only; say in the
-  report what was checked locally and what is left to CI.
+- The maintainer's PC is Windows without Go, by choice: every Go check
+  (gofmt, tidy, vet, tests, cross-builds) runs in GitHub CI only
+  (.github/workflows/ci.yml). Push, then follow the run (`gh run watch`,
+  `gh run view --log-failed`) and fix from its output. Format Go code by
+  hand as gofmt does (tabs, aligned comments in struct fields). Never run
+  WSL, Docker, network or nftables tests on that PC: it drops their
+  internet.
 
 ## Never commit
 

@@ -1,0 +1,87 @@
+package logx
+
+import (
+	"reflect"
+	"strings"
+	"testing"
+)
+
+func TestRedactor(t *testing.T) {
+	var r Redactor
+	if got := r.Redact("plain"); got != "plain" {
+		t.Fatal(got)
+	}
+	r.Set("s3cr3t/pass", "abc", "", "s3cr3t")
+	in := `auth=s3cr3t/pass q=s3cr3t%2Fpass short=abc other=s3cr3t`
+	want := `auth=*** q=*** short=abc other=***`
+	if got := r.Redact(in); got != want {
+		t.Fatalf("got %q", got)
+	}
+	// Share URIs: a password, or user:password, in userinfo form.
+	r.Set("user:p@ss", "P@ss=word")
+	for in, want := range map[string]string{
+		"hysteria2://user:p%40ss@host:443/": "hysteria2://***@host:443/",
+		"hysteria2://P%40ss=word@host:443/": "hysteria2://***@host:443/",
+	} {
+		if got := r.Redact(in); got != want {
+			t.Fatalf("%s: got %q", in, got)
+		}
+	}
+	var nilR *Redactor
+	if nilR.Redact("x") != "x" {
+		t.Fatal("nil redactor")
+	}
+}
+
+func TestRing(t *testing.T) {
+	r := NewRing[int](3)
+	r.Add(1)
+	r.Add(2)
+	if got := r.Snapshot(); !reflect.DeepEqual(got, []int{1, 2}) {
+		t.Fatal(got)
+	}
+	r.Add(3)
+	r.Add(4)
+	r.Add(5)
+	if got := r.Snapshot(); !reflect.DeepEqual(got, []int{3, 4, 5}) {
+		t.Fatal(got)
+	}
+}
+
+func TestRedactEscapedForms(t *testing.T) {
+	r := &Redactor{}
+	secret := `pa"ss\wo/rd<1>`
+	r.Set(secret)
+	for _, line := range []string{
+		`{"auth":"pa\"ss\\wo/rd<1>"}`,  // encoding/json
+		`auth="pa\"ss\\wo/rd<1>"`,      // %q
+		`url=pa%22ss%5Cwo%2Frd%3C1%3E`, // query escape
+		`raw pa"ss\wo/rd<1>`,
+	} {
+		if got := r.Redact(line); strings.Contains(got, "wo/rd") || strings.Contains(got, "wo%2Frd") {
+			t.Errorf("secret left in %q -> %q", line, got)
+		}
+	}
+}
+
+func TestRingFindLast(t *testing.T) {
+	r := NewRing[int](3)
+	if _, ok := r.FindLast(func(*int) bool { return true }); ok {
+		t.Fatal("empty ring")
+	}
+	for i := 1; i <= 5; i++ { // holds 3, 4, 5
+		r.Add(i)
+	}
+	if v, ok := r.FindLast(func(v *int) bool { return true }); !ok || v != 5 {
+		t.Fatalf("newest: %d %v", v, ok)
+	}
+	if v, ok := r.FindLast(func(v *int) bool { return *v%2 == 1 }); !ok || v != 5 {
+		t.Fatalf("odd: %d %v", v, ok)
+	}
+	if v, ok := r.FindLast(func(v *int) bool { return *v == 3 }); !ok || v != 3 {
+		t.Fatalf("oldest: %d %v", v, ok)
+	}
+	if _, ok := r.FindLast(func(v *int) bool { return *v == 2 }); ok {
+		t.Fatal("pushed out")
+	}
+}
