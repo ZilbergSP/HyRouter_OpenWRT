@@ -55,6 +55,15 @@ func (s *Set) EvaluateName(sub Subject, domain string, src DomainSource) NameRes
 				continue
 			}
 		}
+		// HyRouter: a query tells its device (the client that asked);
+		// without it the device items are an unknown part, as programs.
+		if r.hasDev() {
+			if !sub.deviceKnown() {
+				cond |= CondApp
+			} else if !r.matchDevice(sub) {
+				continue
+			}
+		}
 		if r.proto != 0 || len(r.ports) > 0 {
 			cond |= CondProto
 		}

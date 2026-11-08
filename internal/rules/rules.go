@@ -57,6 +57,9 @@ type Rule struct {
 	ID      string `json:"id,omitempty"`
 	Name    string `json:"name"`
 	Enabled *bool  `json:"enabled,omitempty"` // nil = enabled
+	// Devices (HyRouter): the LAN devices the rule applies to, by MAC,
+	// address or "dev:<id>" (device.go); an empty list = any device.
+	Devices []string `json:"devices,omitempty"`
 	// Apps and Domains: the rule matches a connection of any listed
 	// application to any listed domain (an empty list = any). App and
 	// Domain are the older single-item form, still accepted.
@@ -140,6 +143,10 @@ type Subject struct {
 	Proc  *procinfo.Info // nil when the owner is unknown
 	Proto uint8          // 6 or 17
 	Dst   netip.AddrPort
+	// HyRouter: the device the flow comes from, its MAC (zero = unknown)
+	// and source address (invalid = unknown); see device.go.
+	MAC MAC
+	Src netip.Addr
 }
 
 // Result is the outcome of an evaluation.
@@ -247,6 +254,8 @@ type compiled struct {
 	// addrLocal: every address item covers local ranges only (localOnly);
 	// EvaluateName reports it for address-only matches.
 	addrLocal bool
+	// devs: device items (HyRouter, device.go); empty = any device.
+	devs []devPat
 }
 
 func (r *compiled) hasApp() bool  { return len(r.apps) > 0 }
@@ -407,8 +416,11 @@ func parseDomainPattern(p string) (domPat, error) {
 func compileRule(i int, r Rule, g Geo) (compiled, error) {
 	cr := compiled{src: r, name: ruleName(i, r), action: r.Action, profile: r.Profile, fallback: r.Fallback}
 	apps, doms := r.AllApps(), r.AllDomains()
-	if len(apps) == 0 && len(doms) == 0 && len(r.Ports) == 0 {
-		return cr, fmt.Errorf("%s: укажите программу, сайт или порт", cr.name)
+	if len(apps) == 0 && len(doms) == 0 && len(r.Ports) == 0 && len(r.Devices) == 0 {
+		return cr, fmt.Errorf("%s: укажите устройство, сайт или порт", cr.name)
+	}
+	if err := cr.compileDevices(r); err != nil {
+		return cr, err
 	}
 	for _, a := range apps {
 		p := strings.TrimSpace(a.Pattern)
@@ -611,7 +623,7 @@ func (r *compiled) base(sub Subject) bool {
 	if r.hasApp() && (sub.Proc == nil || !r.matchApp(sub.Proc)) {
 		return false
 	}
-	return true
+	return r.matchDevice(sub)
 }
 
 func (s *Set) result(r *compiled) Result {

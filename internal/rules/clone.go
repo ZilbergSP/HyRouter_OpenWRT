@@ -7,6 +7,7 @@ import "slices"
 // must be copied here too (TestCloneShares checks it).
 func (r Rule) Clone() Rule {
 	r.Enabled = clonePtr(r.Enabled)
+	r.Devices = slices.Clone(r.Devices)
 	r.Apps = slices.Clone(r.Apps)
 	r.Domains = slices.Clone(r.Domains)
 	r.App = clonePtr(r.App)

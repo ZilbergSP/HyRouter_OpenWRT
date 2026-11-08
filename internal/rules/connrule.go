@@ -110,7 +110,7 @@ func (r *compiled) mayBase(sub Subject) bool {
 	if r.hasApp() && (sub.Proc == nil || !r.matchApp(sub.Proc)) {
 		return false
 	}
-	return true
+	return r.matchDevice(sub)
 }
 
 // mayMatchIP is matchIP where a geoip: category still downloading counts.
@@ -379,12 +379,14 @@ func RepeatKey(r Rule) string {
 		route += "\x00" + r.Profile
 	}
 	return strings.Join([]string{route, fmt.Sprint(x.proto), fmt.Sprint(x.ports),
-		strings.Join(x.appKeys(), "\x01"), strings.Join(x.destKeys(), "\x01")}, "\x00")
+		strings.Join(x.appKeys(), "\x01"), strings.Join(x.destKeys(), "\x01"),
+		strings.Join(x.devKeys(), "\x01")}, "\x00")
 }
 
 func (r *compiled) sameMatch(y *compiled) bool {
 	return r.proto == y.proto && slices.Equal(r.ports, y.ports) &&
-		slices.Equal(r.appKeys(), y.appKeys()) && slices.Equal(r.destKeys(), y.destKeys())
+		slices.Equal(r.appKeys(), y.appKeys()) && slices.Equal(r.destKeys(), y.destKeys()) &&
+		slices.Equal(r.devKeys(), y.devKeys())
 }
 
 func (r *compiled) appKeys() []string {
@@ -432,6 +434,9 @@ func intersects(x, y *compiled) bool {
 		return false
 	}
 	if x.hasApp() && y.hasApp() && !anyPair(x.apps, y.apps, appsOverlap) {
+		return false
+	}
+	if x.hasDev() && y.hasDev() && !anyPair(x.devs, y.devs, devsOverlap) {
 		return false
 	}
 	if !x.hasDest() || !y.hasDest() {

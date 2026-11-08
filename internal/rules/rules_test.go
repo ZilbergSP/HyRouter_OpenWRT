@@ -361,7 +361,7 @@ func TestCompilePortRules(t *testing.T) {
 	if _, err := Compile(Config{Rules: []Rule{{Protocol: "tcp", Ports: PortList{"22"}, Action: Direct}}}); err != nil {
 		t.Fatalf("port-only: %v", err)
 	}
-	if _, err := Compile(Config{Rules: []Rule{{Name: "x", Protocol: "udp", Action: Direct}}}); err == nil || err.Error() != "x: укажите программу, сайт или порт" {
+	if _, err := Compile(Config{Rules: []Rule{{Name: "x", Protocol: "udp", Action: Direct}}}); err == nil || err.Error() != "x: укажите устройство, сайт или порт" {
 		t.Fatalf("protocol only: %v", err)
 	}
 	if _, err := Compile(Config{Rules: []Rule{{Name: "SSH", Domains: []string{"a.com"}, Ports: PortList{"0"}, Action: Direct}}}); err == nil || !strings.HasPrefix(err.Error(), "SSH: неверный порт «0»") {

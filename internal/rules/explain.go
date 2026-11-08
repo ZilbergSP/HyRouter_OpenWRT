@@ -26,6 +26,9 @@ type Step struct {
 type Query struct {
 	// App is an exe name ("discord.exe") or a full path.
 	App string `json:"app"`
+	// Device (HyRouter) is the MAC or IP address of the device ("" = not
+	// given: rules for devices do not match).
+	Device string `json:"device"`
 	// Domain may be empty; Names are other known names of the address
 	// (DNS cache) used when Domain is empty, each its own site. Sites are
 	// such names grouped by site, as dnscache.Cache.Sites gives them: the
@@ -69,6 +72,10 @@ type Explanation struct {
 func Explain(c Config, main string, q Query) Explanation {
 	var ex Explanation
 	var proc *procinfo.Info
+	dev, err := DeviceSubject(q.Device)
+	if err != nil {
+		ex.Notes = append(ex.Notes, err.Error()+": правила для устройств проверены как для неизвестного устройства.")
+	}
 	app := strings.TrimSpace(q.App)
 	pathKnown := strings.ContainsAny(app, `\/`)
 	if app != "" {
@@ -157,7 +164,15 @@ func Explain(c Config, main string, q Query) Explanation {
 			case errs[i] != nil:
 				st.Reason = "ошибка в правиле: " + errs[i].Error()
 			default:
+				ok, why := crs[i].explainDevice(dev)
+				if !ok {
+					st.Reason = why
+					break
+				}
 				st.Matched, st.Reason = crs[i].explainSite(proc, pathKnown, q.Proto, q.Port, site, q.IP.Unmap())
+				if st.Matched && why != "" {
+					st.Reason = why + ", " + st.Reason
+				}
 			}
 			if !st.Enabled {
 				if st.Matched {
@@ -510,6 +525,9 @@ func (r *compiled) covers(b *compiled) bool {
 				return false
 			}
 		}
+	}
+	if r.hasDev() && !r.coversDevices(b) {
+		return false
 	}
 	if !r.hasDest() {
 		return true
