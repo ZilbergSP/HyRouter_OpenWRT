@@ -26,3 +26,28 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+-------------------------------------------------------------------------
+zapret2 and the DPI bypass
+-------------------------------------------------------------------------
+
+zapret2 (https://github.com/bol-van/zapret2): nfqws2 (linux-arm64,
+linux-x86_64), its Lua scripts and fake payloads from the official v1.0.7
+release, each checked by its SHA-256 (build/deps.json); MIT, Copyright (c)
+2016-2026 bol-van. The bypass methods in internal/zapret come from HyRoute,
+adapted from the presets of Zapret 2 GUI
+(https://github.com/TheFirstNoob/Zapret-2-GUI), MIT, Copyright (c) 2026
+TheFirstNoob; the YouTube and Discord domain lists follow
+zapret-discord-youtube (https://github.com/Flowseal/zapret-discord-youtube),
+MIT, Copyright (c) 2024-2026 Flowseal. The nftables rules follow zapret2's
+common/nft.sh. The checks run all methods at once from separate local port
+ranges, as nfqws2-keenetic-strategy-selector
+(https://github.com/Omn1z/nfqws2-keenetic-strategy-selector) and blockcheckw
+(https://github.com/rcd27/blockcheckw, MIT) do; no code of theirs is
+included.
+
+Go modules: github.com/refraction-networking/utls (BSD-3-Clause, the
+browser-like TLS handshake of the checks) with github.com/andybalholm/brotli
+(MIT) and github.com/klauspost/compress (BSD-3-Clause); golang.org/x/net,
+golang.org/x/crypto, golang.org/x/sys, golang.org/x/text (BSD-3-Clause);
+gopkg.in/yaml.v3 (MIT and Apache-2.0).

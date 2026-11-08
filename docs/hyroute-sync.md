@@ -17,7 +17,7 @@ internal/<пакет>`, перенести нужное, поправить в �
 | `geodata` | d68dcbe | как есть |
 | `groups` | d68dcbe | как есть |
 | `hy2uri` | d68dcbe | как есть |
-| `hysteria` | d68dcbe | как есть; запуск процессов на Linux — этап 2 |
+| `hysteria` | 9c5c7b3 | как есть (с `child.go` из v1.3.21 для `nfqws2`); запуск процессов на Linux — этап 2 |
 | `logx` | d68dcbe | как есть |
 | `procinfo` | d68dcbe | только `procinfo.go`: тип `Info` для условия «программы» в `rules` (на роутере не используется) |
 | `release` | d68dcbe | как есть |
@@ -29,6 +29,7 @@ internal/<пакет>`, перенести нужное, поправить в �
 | `subfmt` | d68dcbe | как есть |
 | `tunnels` | d68dcbe | как есть |
 | `vless` | d68dcbe | как есть |
+| `zapret` | 9c5c7b3 | `nfqws2` вместо `winws2`: `--qnum`/`--fwmark`/`--user` вместо фильтров WinDivert (`build.go`), правила nftables (`nft.go`, новый), без `ProbeExclude`/`ProbeOnly`; методы, списки, план, подбор, проверки и супервизор — как есть |
 
 Ещё не перенесены, будут переделаны под роутер: `relay` (TPROXY вместо
 reflect-NAT), `store`, `settings`, контроллер `app`.
