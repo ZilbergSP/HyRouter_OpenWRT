@@ -35,7 +35,10 @@ const (
 type BuildConfig struct {
 	// Dir holds lua/ and blobs/ (absolute).
 	Dir string
-	// Lists holds the list files (absolute), written by WriteLists.
+	// Lists holds the list files (absolute), written by WriteLists. It and
+	// the folders above it must be readable by everyone: nfqws2 started as
+	// root runs as User (or uid 2147483647) once its queue is open, and
+	// rereads a list that changed.
 	Lists string
 	// Plans: the targets processed (a target absent is not).
 	Plans map[Target]Plan

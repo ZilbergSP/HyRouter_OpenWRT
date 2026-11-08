@@ -20,8 +20,18 @@ func TestNFQWS2DryRun(t *testing.T) {
 		t.Skip("HYROUTER_ZAPRET_DIR is set by CI: the unpacked zapret2 release")
 	}
 	exe := filepath.Join(src, "binaries", "linux-x86_64", "nfqws2")
-	// The layout hyrouterd installs: lua/ and blobs/ in one folder.
-	dir := t.TempDir()
+	// The layout hyrouterd installs: lua/ and blobs/ in one folder. nfqws2
+	// started as root runs as another user once its queue is open and
+	// rereads the lists then: the folder must be open to everyone, unlike
+	// t.TempDir's.
+	dir, err := os.MkdirTemp("", "hyrouter-zapret-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(dir) })
+	if err := os.Chmod(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
 	for _, f := range LuaFiles {
 		copyFile(t, filepath.Join(src, "lua", f), filepath.Join(dir, "lua", f))
 	}
