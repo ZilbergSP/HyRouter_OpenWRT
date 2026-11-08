@@ -1,0 +1,11 @@
+# Test links and local notes: never committed
+.dev/
+
+# Build output
+/bin/
+/dist/
+*.ipk
+*.apk
+
+# UI dependencies (web/dist is committed)
+node_modules/
