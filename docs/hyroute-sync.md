@@ -29,7 +29,7 @@ internal/<пакет>`, перенести нужное, поправить в �
 | `subfmt` | d68dcbe | как есть |
 | `tunnels` | d68dcbe | как есть |
 | `vless` | d68dcbe | как есть |
-| `zapret` | 9c5c7b3 | `nfqws2` вместо `winws2`: `--qnum`/`--fwmark`/`--user` вместо фильтров WinDivert (`build.go`), правила nftables (`nft.go`, новый), без `ProbeExclude`/`ProbeOnly`; методы, списки, план, подбор, проверки и супервизор — как есть |
+| `zapret` | 9e42be1 (v1.3.22) | `nfqws2` вместо `winws2`: `--qnum`/`--fwmark`/`--user` вместо фильтров WinDivert (`build.go`), правила nftables (`nft.go`, новый), без `ProbeExclude`/`ProbeOnly`; методы, списки, план, подбор, проверки и супервизор — как есть |
 
 Ещё не перенесены, будут переделаны под роутер: `relay` (TPROXY вместо
 reflect-NAT), `store`, `settings`, контроллер `app`.
