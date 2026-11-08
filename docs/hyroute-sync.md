@@ -19,7 +19,7 @@ internal/<пакет>`, перенести нужное, поправить в �
 | `hy2uri` | d68dcbe | как есть |
 | `hysteria` | d68dcbe | как есть; запуск процессов на Linux — этап 2 |
 | `logx` | d68dcbe | как есть |
-| `procinfo` | d68dcbe | только `procinfo.go`; временно, пока правила не перешли на устройства |
+| `procinfo` | d68dcbe | только `procinfo.go`: тип `Info` для условия «программы» в `rules` (на роутере не используется) |
 | `release` | d68dcbe | как есть |
 | `ruleconv` | d68dcbe | как есть |
 | `rules` | d68dcbe | + условие «устройства» (`device.go`; поле `Devices`, `Subject.MAC`/`Src`, `Query.Device`); программы остаются, на роутере не используются |
