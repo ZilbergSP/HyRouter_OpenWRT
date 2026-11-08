@@ -53,9 +53,12 @@ jobs:
       - name: nfqws2 takes every command line, nftables every rule set
         if: ${{ !cancelled() }}
         run: |
-          export HYROUTER_ZAPRET_DIR="$RUNNER_TEMP/zapret2/zapret2-$(jq -r .zapret2.version build/deps.json)"
+          zdir="$RUNNER_TEMP/zapret2/zapret2-$(jq -r .zapret2.version build/deps.json)"
           export HYROUTER_NFT_DIR="$RUNNER_TEMP/nft"
-          go test -v -run 'NFQWS2DryRun|NFTFiles' ./internal/zapret/
+          go test -c -o "$RUNNER_TEMP/zapret.test" ./internal/zapret
+          "$RUNNER_TEMP/zapret.test" -test.v -test.run NFTFiles
+          # As root, like hyrouterd: nfqws2 drops to --user only from root.
+          sudo HYROUTER_ZAPRET_DIR="$zdir" "$RUNNER_TEMP/zapret.test" -test.v -test.run NFQWS2DryRun
           sudo apt-get install -y -qq nftables >/dev/null
           for f in "$HYROUTER_NFT_DIR"/*.nft; do
             echo "== $f"

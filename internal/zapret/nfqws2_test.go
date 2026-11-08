@@ -51,7 +51,11 @@ func TestNFQWS2DryRun(t *testing.T) {
 		p, _ := Settings{Enabled: true, Targets: Targets}.PlanFor(tg, "")
 		circular[tg] = p
 	}
-	runs = append(runs, run{name: "circular", plans: circular}, run{name: "circular as nobody", plans: circular, user: "nobody"})
+	runs = append(runs, run{name: "circular", plans: circular})
+	if os.Geteuid() == 0 {
+		// Dropping root takes root (initgroups): hyrouterd runs as root.
+		runs = append(runs, run{name: "circular as nobody", plans: circular, user: "nobody"})
+	}
 
 	for _, r := range runs {
 		args, err := Build(BuildConfig{Dir: dir, Lists: lists, Plans: r.plans, QNum: QNumBypass, User: r.user})

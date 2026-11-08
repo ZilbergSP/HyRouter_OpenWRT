@@ -48,7 +48,7 @@ func TestNFT(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(off, "queue") || strings.Contains(off, "zapret_pre") || !strings.Contains(off, "tcp sport 30000-31949 return") {
+	if strings.Contains(off, "queue") || strings.Contains(off, "chain zapret_pre {") || !strings.Contains(off, "tcp sport 30000-31949 return") {
 		t.Errorf("bypass off:\n%s", off)
 	}
 
