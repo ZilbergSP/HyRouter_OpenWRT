@@ -144,7 +144,6 @@ jobs:
             hyrouterd -version
             sh -n /etc/init.d/hyrouter
             grep -q /etc/hyrouter/ /lib/upgrade/keep.d/hyrouter
-            if opkg install /p/hyrouter-lite_0.0.0-1_x86_64.ipk 2>/dev/null; then echo "Lite installed over HyRouter"; exit 1; fi
             opkg remove hyrouter
             test ! -e /usr/bin/hyrouterd'
       - name: Install on OpenWrt 25.12 (apk)

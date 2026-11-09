@@ -25,7 +25,7 @@ TARGETS=(
 	"hyrouter-lite arm GOARM=7 arm_cortex-a7_neon-vfpv4 arm_cortex-a7 arm_cortex-a9 arm_cortex-a15_neon-vfpv4"
 )
 
-rm -rf "$OUT/bin" "$OUT/tree" "$OUT/packages"
+rm -rf "${OUT:?}/bin" "${OUT:?}/tree" "${OUT:?}/packages"
 mkdir -p "$OUT/bin" "$OUT/tree" "$OUT/packages"
 
 tarit() { tar --owner=0 --group=0 --numeric-owner --format=gnu "$@"; }
