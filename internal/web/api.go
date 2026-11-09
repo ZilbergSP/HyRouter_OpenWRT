@@ -13,6 +13,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/zilbergsp/hyrouter/internal/ctl"
 	"github.com/zilbergsp/hyrouter/internal/dnspolicy"
 	"github.com/zilbergsp/hyrouter/internal/edition"
 	"github.com/zilbergsp/hyrouter/internal/groups"
@@ -41,6 +42,7 @@ type stateView struct {
 	Groups     groups.File        `json:"groups"`
 	Subs       []subView          `json:"subs"`
 	Strategies []presetView       `json:"strategies"`
+	Undo       *ctl.UndoInfo      `json:"undo"`
 	Presets    []presetView       `json:"dnsPresets"`
 }
 
@@ -55,6 +57,7 @@ func (s *Server) view(st store.State) stateView {
 		Devices:  st.Devices,
 		Groups:   st.Groups,
 		Subs:     subViews(st),
+		Undo:     s.Ctl.Undo(),
 		Servers:  make([]hysteria.Profile, 0, len(st.Servers)),
 	}
 	for _, g := range []groups.Strategy{groups.Failover, groups.Latency, groups.RoundRobin, groups.Random, groups.Sticky} {

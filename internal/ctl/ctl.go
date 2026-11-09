@@ -107,6 +107,9 @@ type Controller struct {
 	editMu sync.Mutex
 	// subMu: one subscription update at a time.
 	subMu sync.Mutex
+	// rmu guards restore, the planned restores.
+	rmu     sync.Mutex
+	restore restoreState
 }
 
 // New makes a controller that is not routing yet.

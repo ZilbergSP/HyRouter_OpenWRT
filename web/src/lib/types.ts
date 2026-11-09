@@ -197,6 +197,19 @@ export interface StatsReport {
   storeError?: string;
 }
 
+export interface RestorePlan {
+  token: string;
+  created: string;
+  edition: string;
+  servers: number;
+  rules: number;
+  devices: number;
+  groups: number;
+  subs: number;
+  routing: boolean;
+  warnings: string[];
+}
+
 export interface MergeStats {
   added: number;
   updated: number;
@@ -215,6 +228,7 @@ export interface StateView {
   devices: Device[];
   groups: GroupsFile;
   subs: Sub[];
+  undo: { at: string; partial: boolean } | null;
   strategies: { id: Strategy; name: string }[];
   dnsPresets: { id: string; name: string }[];
 }

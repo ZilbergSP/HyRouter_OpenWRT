@@ -2,6 +2,7 @@
   import { api, errorText } from '../lib/api';
   import type { StateView } from '../lib/types';
   import Geo from './Geo.svelte';
+  import Backup from './Backup.svelte';
 
   let {
     view,
@@ -94,6 +95,8 @@
 </form>
 
 <Geo {view} {onstate} />
+
+<Backup {view} {onstate} />
 
 <div class="card">
   <h2>Порты</h2>
