@@ -1,9 +1,12 @@
 # HyRouter development notes
 
-HyRouter is HyRoute for OpenWrt routers: a Go daemon (hyrouterd) with an
-embedded Svelte 5 web UI that routes the whole LAN through Hysteria 2 and
-VLESS servers by rules on devices, sites, IPs, ports and geosite/geoip
-lists. Interception: nftables (own table `inet hyrouter`) with TPROXY.
+HyRouter is HyRoute for OpenWrt and Keenetic routers: a Go daemon
+(hyrouterd) with an embedded Svelte 5 web UI that routes the whole LAN
+through Hysteria 2 and VLESS servers by rules on devices, sites, IPs, ports
+and geosite/geoip lists. Interception: nftables (own table `inet hyrouter`)
+with TPROXY; on KeeneticOS with Entware (build tag `keenetic`,
+internal/platform) iptables chains `HYR_*` and ipsets `hyr_*` (internal/ipt)
+that the firmware's rebuilds must not lose.
 Architecture and plan: docs/ARCHITECTURE.md. The users speak Russian:
 answer in Russian, UI text and docs are Russian.
 
@@ -43,9 +46,15 @@ one at ../HyRoute. This repository lives in D:\Work\Projects\HyRoute_OpenWRT.
   hand as gofmt does (tabs, aligned comments in struct fields). Never run
   WSL, Docker, network or nftables tests on that PC: it drops their
   internet.
-- Both editions: CI vets and tests with `-tags lite` too and builds Lite
-  for mipsle and armv7; test/netns.sh (routing) and the packages job
-  (install in the OpenWrt 24.10 and 25.12 images) run in CI only.
+- Both editions and both platforms: CI vets and tests with `-tags lite`,
+  `-tags keenetic` and `-tags keenetic,lite` too, and builds Lite for
+  mipsle and armv7 and KeeneticOS for arm64, mipsle and mips;
+  test/netns.sh (routing; with HYROUTER_PLATFORM=keenetic on legacy
+  iptables) and the packages job (install in the OpenWrt 24.10 and 25.12
+  images and in Entware) run in CI only.
+- Code that differs by platform goes into internal/platform or the
+  firewall adapters (internal/ctl/fw_nft.go, fw_ipt.go); a KeeneticOS
+  firewall change needs its iptables rules checked too (TestIPTFiles).
 - Build web/dist from LF copies of the sources, as CI on Linux does, or
   the dist check fails.
 

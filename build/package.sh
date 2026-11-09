@@ -94,7 +94,7 @@ for t in "${TARGETS[@]}"; do
 		desc="HyRouter for KeeneticOS: the LAN routed through Hysteria 2 and VLESS servers by rules for devices and sites, with a web interface"
 		;;
 	hyrouter-keenetic-lite)
-		tags=(-tags keenetic,lite)
+		tags=(-tags "keenetic,lite")
 		other=hyrouter-keenetic
 		desc="HyRouter Lite for KeeneticOS: the LAN routed through Hysteria 2 servers by rules for devices and sites, for routers with 128-256 MB of memory"
 		;;

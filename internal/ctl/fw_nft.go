@@ -40,11 +40,11 @@ func fwLoad(ctx context.Context, script fwScript, lan []string) ([]string, error
 	return nil, nft.Load(ctx, script)
 }
 
-func fwRemove(ctx context.Context) error { return nft.Remove(ctx) }
-func fwOpenSets() (fwSets, error) { return nft.OpenSets() }
+func fwRemove(ctx context.Context) error                  { return nft.Remove(ctx) }
+func fwOpenSets() (fwSets, error)                         { return nft.OpenSets() }
 func fwLoadGuard(ctx context.Context, lan []string) error { return nft.LoadGuard(ctx, lan) }
-func fwRemoveGuard(ctx context.Context) error { return nft.RemoveGuard(ctx) }
-func fwGuardActive(ctx context.Context) bool { return nft.GuardActive(ctx) }
+func fwRemoveGuard(ctx context.Context) error             { return nft.RemoveGuard(ctx) }
+func fwGuardActive(ctx context.Context) bool              { return nft.GuardActive(ctx) }
 
 // fwZapret is the DPI bypass's part of the table.
 func fwZapret(c zapret.NFTConfig) (string, error) { return zapret.NFT(c) }

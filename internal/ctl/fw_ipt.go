@@ -58,11 +58,11 @@ func fwLoad(ctx context.Context, script fwScript, lan []string) ([]string, error
 	return ipt.Load(ctx, script, lan)
 }
 
-func fwRemove(ctx context.Context) error { return ipt.Remove(ctx) }
-func fwOpenSets() (fwSets, error) { return ipt.OpenSets() }
+func fwRemove(ctx context.Context) error                  { return ipt.Remove(ctx) }
+func fwOpenSets() (fwSets, error)                         { return ipt.OpenSets() }
 func fwLoadGuard(ctx context.Context, lan []string) error { return ipt.LoadGuard(ctx, lan) }
-func fwRemoveGuard(ctx context.Context) error { return ipt.RemoveGuard(ctx) }
-func fwGuardActive(ctx context.Context) bool { return ipt.GuardActive(ctx) }
+func fwRemoveGuard(ctx context.Context) error             { return ipt.RemoveGuard(ctx) }
+func fwGuardActive(ctx context.Context) bool              { return ipt.GuardActive(ctx) }
 
 // fwZapret is the DPI bypass's part of the rules, as JSON: the
 // controller keeps it as text, as the nftables one.

@@ -45,6 +45,7 @@ start() {
 		return 0
 	fi
 	mkdir -p /tmp/hyrouter /opt/var/run
+	# shellcheck disable=SC3045 # the firmware's busybox ash has ulimit -n
 	ulimit -n 65535 2>/dev/null
 	supervise </dev/null >/dev/null 2>&1 &
 	echo $! >"$PIDFILE"

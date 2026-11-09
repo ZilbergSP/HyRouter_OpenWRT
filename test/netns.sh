@@ -317,10 +317,12 @@ if [ -n "$KEENETIC" ]; then
 	wait_tunnel 40 || fail "hyrouterd did not put the rules back"
 	pass "hyrouterd put the rules back"
 
-	# The firmware takes the routing rule: VPN traffic is refused, never
-	# sent direct, until hyrouterd adds it again.
+	# The firmware takes the routing rule: VPN traffic is refused (or,
+	# once hyrouterd added the rule again, tunneled), never sent direct.
 	ip netns exec rtr ip rule del fwmark "$MARK/$MARK" lookup 7701
-	refused dev http://203.0.113.20/
+	got=$(seen dev http://203.0.113.20/)
+	[ "$got" != "$WAN" ] || fail "VPN traffic went direct without the routing rule"
+	pass "no routing rule: not direct ($got)"
 	wait_tunnel 40 || fail "hyrouterd did not add the routing rule again"
 	pass "the routing rule back"
 fi
