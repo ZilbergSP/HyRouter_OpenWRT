@@ -133,7 +133,7 @@ jobs:
       - name: Packages (.ipk and .apk)
         run: |
           bash build/package.sh 0.0.0 "$RUNNER_TEMP/out"
-          docker run --rm -v "$RUNNER_TEMP/out:/out" openwrt/rootfs:x86-64-25.12.6 /bin/sh /out/apk.sh
+          docker run --rm -v "$RUNNER_TEMP/out:/out" alpine:3.24.4 /bin/sh /out/apk.sh
       - name: Install on OpenWrt 24.10 (opkg)
         run: |
           docker run --rm -v "$RUNNER_TEMP/out/packages:/p:ro" openwrt/rootfs:x86-64-24.10.8 /bin/sh -c '

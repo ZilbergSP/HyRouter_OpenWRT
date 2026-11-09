@@ -1,8 +1,9 @@
 #!/bin/sh
 # Makes the .apk of OpenWrt 25.x from the trees build/package.sh left,
-# with the apk-tools 3 of an OpenWrt 25.12 container:
+# with the apk-tools 3 of an Alpine container (the apk of OpenWrt's own
+# images has no mkpkg):
 #
-#   docker run --rm -v "$OUT:/out" openwrt/rootfs:x86-64-25.12.6 /bin/sh /out/apk.sh
+#   docker run --rm -v "$OUT:/out" alpine:3.24.4 /bin/sh /out/apk.sh
 #
 # The packages are not signed: they are installed with
 # "apk add --allow-untrusted", as any package from outside the feeds.

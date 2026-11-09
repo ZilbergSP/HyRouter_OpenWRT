@@ -43,6 +43,20 @@ one at ../HyRoute. This repository lives in D:\Work\Projects\HyRoute_OpenWRT.
   hand as gofmt does (tabs, aligned comments in struct fields). Never run
   WSL, Docker, network or nftables tests on that PC: it drops their
   internet.
+- Both editions: CI vets and tests with `-tags lite` too and builds Lite
+  for mipsle and armv7; test/netns.sh (routing) and the packages job
+  (install in the OpenWrt 24.10 and 25.12 images) run in CI only.
+- Build web/dist from LF copies of the sources, as CI on Linux does, or
+  the dist check fails.
+
+## Releases
+
+- Tag (annotated, "HyRouter X.Y.Z") only a commit of main whose CI is
+  green, with docs/release-notes/vX.Y.Z.md in place; release.yml checks
+  both. Versions before 1.0 are betas (pre-releases). A published tag is
+  never moved or reused: a fix goes into the next version.
+- Until it has been tried on real routers, the notes say what CI checked
+  and that it was not checked on hardware.
 
 ## Never commit
 

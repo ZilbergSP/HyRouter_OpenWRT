@@ -7,7 +7,7 @@
 # and the sysupgrade list into a tree (OUT/tree/<package>_<arch>), then
 # packs the .ipk of OpenWrt 24.10 (opkg) into OUT/packages. The .apk of
 # OpenWrt 25.x are made from the same trees by build/apk.sh inside an
-# OpenWrt 25.12 container, which has apk-tools 3.
+# Alpine container, which has apk-tools 3 with mkpkg.
 set -euo pipefail
 
 VERSION=$1

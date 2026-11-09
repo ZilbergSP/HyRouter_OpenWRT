@@ -48,7 +48,7 @@ jobs:
       - name: Packages
         run: |
           bash build/package.sh "${TAG#v}" "$RUNNER_TEMP/out"
-          docker run --rm -v "$RUNNER_TEMP/out:/out" openwrt/rootfs:x86-64-25.12.6 /bin/sh /out/apk.sh
+          docker run --rm -v "$RUNNER_TEMP/out:/out" alpine:3.24.4 /bin/sh /out/apk.sh
           mkdir -p dist
           cp "$RUNNER_TEMP"/out/packages/*.ipk "$RUNNER_TEMP"/out/packages/*.apk dist/
           cp "docs/release-notes/$TAG.md" dist/notes.md
