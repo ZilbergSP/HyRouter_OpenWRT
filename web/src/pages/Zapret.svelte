@@ -194,7 +194,7 @@
     </div>
     <p class="muted small">
       HyRouter проверяет сервисы с самого роутера: сначала без обхода, затем каждым методом отдельно, и запоминает
-      лучшие для этой сети{z.network ? ` (шлюз ${z.network})` : ''}. Обход сети во время подбора продолжает работать.
+      лучшие для этой сети{z.network ? ` (${z.network})` : ''}. Обход сети во время подбора продолжает работать.
     </p>
     {#if !z.routing}<p class="muted small">Подбор доступен, когда HyRouter включён.</p>{/if}
     {#if z.pick}
@@ -209,7 +209,12 @@
         {/if}
         <ul>
           {#each Object.entries(z.pick.results ?? {}) as [t, m] (t)}
-            <li><strong>{z.targets.find((x) => x.target === t)?.name ?? t}</strong>: {methodName(m)}</li>
+            <li>
+              <strong>{z.targets.find((x) => x.target === t)?.name ?? t}</strong>: {methodName(m)}
+              {#if m === 'none' && z.pick.open?.[t]?.length}
+                <span class="muted">(с роутера без обхода открылись {z.pick.open[t].join(', ')})</span>
+              {/if}
+            </li>
           {/each}
           {#each Object.entries(z.pick.diagnosis ?? {}) as [t, d] (t)}
             {#if !(z.pick.results ?? {})[t] || !d.bypass}
@@ -223,6 +228,12 @@
         </ul>
         {#if z.pick.skipped?.length}
           <div class="muted">Не проверялись (не открываются и без блокировки): {z.pick.skipped.join('; ')}</div>
+        {/if}
+        {#if !z.pick.running && Object.values(z.pick.results ?? {}).includes('none')}
+          <div class="muted">
+            «Не нужен» значит, что провайдер не мешал проверкам с самого роутера. Если на телефоне или компьютере сервис при этом не
+            открывается, выберите для него метод в списке выше или «Пустить через VPN».
+          </div>
         {/if}
       </div>
     {/if}

@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -72,6 +73,41 @@ func TestFindHolder(t *testing.T) {
 		if _, ok := FindHolder(p); ok {
 			t.Errorf("FindHolder(%d) found a process", p)
 		}
+	}
+}
+
+func TestLeftovers(t *testing.T) {
+	old := procDir
+	procDir = t.TempDir()
+	t.Cleanup(func() { procDir = old })
+	proc := func(pid string, parent int, exe string) {
+		dir := filepath.Join(procDir, pid)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		stat := pid + " (nfqws2) S " + strconv.Itoa(parent) + " 1 1 0 -1\n"
+		if err := os.WriteFile(filepath.Join(dir, "stat"), []byte(stat), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(exe, filepath.Join(dir, "exe")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	const ours = "/opt/share/hyrouter/zapret/nfqws2"
+	proc("100", 1, ours)              // left by an hyrouterd that is gone
+	proc("101", 50, ours)             // this hyrouterd's (50)
+	proc("102", 1, "/opt/bin/nfqws")  // another program's
+	proc("103", 7, ours+" (deleted)") // left by an earlier package
+	if err := os.MkdirAll(filepath.Join(procDir, "self"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	var got []int
+	for _, h := range Leftovers(ours, 50) {
+		got = append(got, h.PID)
+	}
+	slices.Sort(got)
+	if !slices.Equal(got, []int{100, 103}) {
+		t.Errorf("Leftovers: %v, want [100 103]", got)
 	}
 }
 

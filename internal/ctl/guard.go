@@ -66,11 +66,12 @@ func (c *Controller) CloseAtStart() {
 }
 
 // Cleanup removes what HyRouter put in the kernel when no hyrouterd runs
-// (the package's removal): its rules, the kill switch and the routing
-// rule. The settings stay.
+// (the package's removal): its rules, the kill switch, the routing rule
+// and the nfqws2 a crashed hyrouterd left. The settings stay.
 func Cleanup() error {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
+	killLeftovers()
 	return errors.Join(fwRemove(ctx), fwRemoveGuard(ctx), fwRoute.Remove())
 }
 

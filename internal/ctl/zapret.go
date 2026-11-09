@@ -12,6 +12,7 @@ import (
 	"math/rand/v2"
 	"net"
 	"net/netip"
+	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
@@ -92,6 +93,9 @@ func zapretBatch() int {
 type zapretCtl struct {
 	mu  sync.Mutex // apply and pick, one at a time
 	run *zapret.Runner
+	// leftovers: the nfqws2 an earlier hyrouterd left were ended (on the
+	// first apply).
+	leftovers sync.Once
 	// args, key (the network args were built for), net (its name), wan
 	// and err (why the bypass does not run) are written with mu and pmu
 	// held.
@@ -121,6 +125,27 @@ type zapretCtl struct {
 type autoPick struct {
 	at    time.Time
 	found bool
+}
+
+// killLeftovers ends the nfqws2 of an hyrouterd that is gone
+// (zapret.Leftovers: they keep their queues and their bypass) and waits a
+// moment for them to be gone, so their queues are free; the killed PIDs.
+func killLeftovers() []int {
+	var pids []int
+	for _, h := range zapret.Leftovers(filepath.Join(ZapretDir, "nfqws2"), os.Getpid()) {
+		if p, err := os.FindProcess(h.PID); err == nil && p.Kill() == nil {
+			pids = append(pids, h.PID)
+		}
+	}
+	for end := time.Now().Add(time.Second); time.Now().Before(end); time.Sleep(50 * time.Millisecond) {
+		if !slices.ContainsFunc(pids, func(pid int) bool {
+			_, err := os.Stat(fmt.Sprintf("/proc/%d", pid))
+			return err == nil
+		}) {
+			break
+		}
+	}
+	return pids
 }
 
 // queue is the queue of the bypass (mu held).
@@ -221,17 +246,22 @@ func zapretAvailable() bool {
 	return err == nil
 }
 
-// zapretNetKey names the network the router is on: the MAC of the
-// provider's gateway (methods are picked per network).
+// zapretNetKey names the network the router is on (methods are picked per
+// network) and how the page shows it: the MAC of the provider's gateway;
+// on a point-to-point link the link itself, as PPPoE's default route has
+// no gateway (0.0.0.0) and no MAC.
 func (c *Controller) zapretNetKey() (key, name string) {
-	_, gw := platform.DefaultRoute()
-	if !gw.IsValid() {
-		return "", ""
+	dev, gw := platform.DefaultRoute()
+	if !gw.IsValid() || gw.IsUnspecified() {
+		if dev == "" {
+			return "", ""
+		}
+		return "dev:" + dev, "подключение " + dev
 	}
 	if mac := c.neigh.Lookup(gw); !mac.IsZero() {
-		return "gw:" + mac.String(), gw.String()
+		return "gw:" + mac.String(), "шлюз " + gw.String()
 	}
-	return "", gw.String()
+	return "", "шлюз " + gw.String()
 }
 
 // zapretServers are the addresses of the servers HyRouter connects to:
@@ -278,6 +308,11 @@ func (c *Controller) zapretApply() {
 }
 
 func (c *Controller) zapretApplyLocked() {
+	c.zap.leftovers.Do(func() {
+		for _, pid := range killLeftovers() {
+			c.log.Warn("zapret: an nfqws2 an earlier hyrouterd left was killed", "pid", pid)
+		}
+	})
 	run := c.zapretRunner()
 	cfg, err := zapretSettings(c.State())
 	set := func(args []string, why string) {
@@ -566,6 +601,9 @@ type ZapretPickView struct {
 	Skipped   []string                     `json:"skipped,omitempty"`
 	Auto      bool                         `json:"auto,omitempty"`
 	Why       string                       `json:"why,omitempty"`
+	// Open: the hosts of the targets that opened from the router without
+	// a bypass (their result is zapret.None).
+	Open map[zapret.Target][]string `json:"open,omitempty"`
 }
 
 // ZapretView is the «Обход DPI» page.
@@ -694,6 +732,17 @@ func fastest(ws []timed) []timed {
 	return ws
 }
 
+// checkHosts are the hosts of check addresses, each once.
+func checkHosts(urls []string) []string {
+	var out []string
+	for _, u := range urls {
+		if p, err := url.Parse(u); err == nil && p.Hostname() != "" && !slices.Contains(out, p.Hostname()) {
+			out = append(out, p.Hostname())
+		}
+	}
+	return out
+}
+
 // zapretPickRun finds the methods that open each service on this network
 // (HyRoute's pick): a check without the bypass first, then the library's
 // methods all at once, one nfqws2 each on its probe slot, then generated
@@ -706,7 +755,8 @@ func (c *Controller) zapretPickRun(why string) {
 	defer cancel()
 	cfg, err := zapretSettings(c.State())
 	pick := &ZapretPickView{Running: true, Step: "Готовлю подбор…", Total: len(zapret.Methods) + 1,
-		Results: map[zapret.Target]string{}, Diagnosis: map[zapret.Target]ZapretDiag{}, Auto: why != "", Why: why}
+		Results: map[zapret.Target]string{}, Diagnosis: map[zapret.Target]ZapretDiag{}, Open: map[zapret.Target][]string{},
+		Auto: why != "", Why: why}
 	c.zap.pmu.Lock()
 	c.zap.pick, c.zap.cancel = pick, cancel
 	c.zap.pmu.Unlock()
@@ -794,9 +844,30 @@ func (c *Controller) zapretPickRun(why string) {
 			skipped = nil
 		}
 	}
-	for t, r := range checkAll(0, left) {
+	first := checkAll(0, left)
+	// A failure no bypass beats (an address that does not answer, a name
+	// that does not resolve) may be passing. Such a target is checked once
+	// more before methods are tried for it: otherwise the first method
+	// would "open" what opens without one by the time it is tried.
+	var again []zapret.Target
+	for t, r := range first {
+		if !r.OK && !r.Bypassable() {
+			again = append(again, t)
+		}
+	}
+	if len(again) > 0 && ctx.Err() == nil {
+		update(func(p *ZapretPickView) {
+			p.Step = "Часть адресов не ответила: проверяю без обхода ещё раз"
+		})
+		maps.Copy(first, checkAll(0, again))
+	}
+	for t, r := range first {
 		if r.OK {
-			update(func(p *ZapretPickView) { p.Results[t] = zapret.None })
+			update(func(p *ZapretPickView) {
+				p.Results[t] = zapret.None
+				p.Open[t] = checkHosts(checks[t])
+				delete(p.Diagnosis, t)
+			})
 			left = slices.DeleteFunc(left, func(x zapret.Target) bool { return x == t })
 			continue
 		}

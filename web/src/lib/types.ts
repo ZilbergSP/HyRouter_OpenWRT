@@ -254,6 +254,7 @@ export interface ZapretView {
     skipped?: string[];
     auto?: boolean;
     why?: string;
+    open?: Record<string, string[]> | null;
   };
   commandLine?: string;
   healNote?: string;

@@ -87,6 +87,29 @@ type Holder struct {
 	Parent int    // its parent's process ID
 }
 
+// Leftovers are the processes running exe whose parent is not parent:
+// nfqws2 of an hyrouterd that is gone. They outlive it: nfqws2 drops root
+// for another user, and the kernel clears the parent-death signal
+// (Pdeathsig) when a process changes its user, so a crashed or killed
+// hyrouterd leaves its nfqws2 holding their queues.
+func Leftovers(exe string, parent int) []Holder {
+	ents, err := os.ReadDir(procDir)
+	if err != nil {
+		return nil
+	}
+	var out []Holder
+	for _, e := range ents {
+		pid, err := strconv.ParseInt(e.Name(), 10, 64)
+		if err != nil {
+			continue
+		}
+		if h, ok := FindHolder(pid); ok && h.Exe == exe && h.Parent != parent {
+			out = append(out, h)
+		}
+	}
+	return out
+}
+
 // FindHolder is the process whose ID is port (false: there is none, the
 // socket got another port ID).
 func FindHolder(port int64) (Holder, bool) {
