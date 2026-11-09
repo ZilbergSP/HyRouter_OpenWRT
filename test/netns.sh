@@ -98,10 +98,12 @@ class H(http.server.BaseHTTPRequestHandler):
 socketserver.ThreadingTCPServer.allow_reuse_address = True
 socketserver.ThreadingTCPServer(("0.0.0.0", 80), H).serve_forever()
 EOF
+# One socket per address: a reply must come from the address the client
+# asked, or the router's conntrack does not take it for the answer.
 cat >"$W/udp.py" <<'EOF'
-import socket
+import socket, sys
 s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-s.bind(("0.0.0.0", 5353))
+s.bind((sys.argv[1], 5353))
 while True:
     data, addr = s.recvfrom(2048)
     s.sendto(addr[0].encode(), addr)
@@ -118,8 +120,10 @@ except Exception:
 EOF
 ip netns exec net python3 "$W/web.py" &
 PIDS+=($!)
-ip netns exec net python3 "$W/udp.py" &
-PIDS+=($!)
+for a in 10 20 30 40 50; do
+	ip netns exec net python3 "$W/udp.py" "203.0.113.$a" &
+	PIDS+=($!)
+done
 openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes -keyout "$W/key.pem" -out "$W/cert.pem" -days 1 -subj /CN=ci.test 2>/dev/null
 cat >"$W/server.yaml" <<EOF
 listen: 198.51.100.2:8443
