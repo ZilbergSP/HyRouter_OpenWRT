@@ -35,6 +35,11 @@ jobs:
       - name: go test
         if: ${{ !cancelled() }}
         run: go test -race ./...
+      - name: HyRouter Lite (vet and tests with -tags lite)
+        if: ${{ !cancelled() }}
+        run: |
+          go vet -tags lite ./...
+          go test -tags lite ./internal/edition/ ./internal/nft/ ./internal/rules/
       - name: Known vulnerabilities (govulncheck)
         if: ${{ !cancelled() }}
         run: go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...
@@ -57,6 +62,8 @@ jobs:
           export HYROUTER_NFT_DIR="$RUNNER_TEMP/nft"
           go test -c -o "$RUNNER_TEMP/zapret.test" ./internal/zapret
           "$RUNNER_TEMP/zapret.test" -test.v -test.run NFTFiles
+          go test -c -o "$RUNNER_TEMP/nft.test" ./internal/nft
+          "$RUNNER_TEMP/nft.test" -test.v -test.run NFTFiles
           # As root, like hyrouterd: nfqws2 drops to --user only from root.
           sudo HYROUTER_ZAPRET_DIR="$zdir" "$RUNNER_TEMP/zapret.test" -test.v -test.run NFQWS2DryRun
           sudo apt-get install -y -qq nftables >/dev/null
@@ -64,10 +71,13 @@ jobs:
             echo "== $f"
             sudo nft -c -f "$f"
           done
-      - name: hyrouterd for the routers (arm64, amd64)
+      - name: hyrouterd for the routers (HyRouter arm64, amd64; Lite mipsle, armv7)
         if: ${{ !cancelled() }}
         run: |
+          export CGO_ENABLED=0 GOOS=linux
           for arch in arm64 amd64; do
-            CGO_ENABLED=0 GOOS=linux GOARCH=$arch go build -trimpath -ldflags '-s -w' -o "$RUNNER_TEMP/hyrouterd-$arch" ./cmd/hyrouterd
-            ls -l "$RUNNER_TEMP/hyrouterd-$arch"
+            GOARCH=$arch go build -trimpath -ldflags '-s -w' -o "$RUNNER_TEMP/hyrouterd-$arch" ./cmd/hyrouterd
           done
+          GOARCH=mipsle GOMIPS=softfloat go build -tags lite -trimpath -ldflags '-s -w' -o "$RUNNER_TEMP/hyrouterd-lite-mipsle" ./cmd/hyrouterd
+          GOARCH=arm GOARM=7 go build -tags lite -trimpath -ldflags '-s -w' -o "$RUNNER_TEMP/hyrouterd-lite-armv7" ./cmd/hyrouterd
+          ls -l "$RUNNER_TEMP"/hyrouterd-*

@@ -7,6 +7,8 @@ import (
 	"flag"
 	"fmt"
 	"os"
+
+	"github.com/zilbergsp/hyrouter/internal/edition"
 )
 
 // version is set at build time: -ldflags "-X main.version=1.0.0".
@@ -16,7 +18,7 @@ func main() {
 	showVersion := flag.Bool("version", false, "print the version and exit")
 	flag.Parse()
 	if *showVersion {
-		fmt.Println("hyrouterd", version)
+		fmt.Printf("hyrouterd %s (%s)\n", version, edition.Name)
 		return
 	}
 	fmt.Fprintln(os.Stderr, "hyrouterd: маршрутизация ещё не готова")
