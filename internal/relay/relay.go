@@ -25,6 +25,7 @@ import (
 
 	"golang.org/x/sys/unix"
 
+	"github.com/zilbergsp/hyrouter/internal/groups"
 	"github.com/zilbergsp/hyrouter/internal/rules"
 	"github.com/zilbergsp/hyrouter/internal/sniff"
 	"github.com/zilbergsp/hyrouter/internal/socks5"
@@ -55,8 +56,11 @@ type Config struct {
 	Names func(netip.Addr) []string
 	// MAC tells a LAN address's MAC (zero when unknown).
 	MAC func(netip.Addr) rules.MAC
-	// Tunnel returns a server's way out, nil when it does not run.
-	Tunnel func(profile string) Tunnel
+	// Pick chooses the server of a Tunnel decision: its server or group,
+	// then its fallbacks. It returns the decision moved to that server
+	// and its way out; nil when none can carry the connection, which is
+	// then refused.
+	Pick func(res rules.Result, udp bool, h groups.Hint) (rules.Result, Tunnel)
 	// Limit bounds the TCP connections and UDP flows at once (0 = none).
 	Limit int
 	Log   *slog.Logger
@@ -259,7 +263,7 @@ func (r *Relay) handleTunnel(c *net.TCPConn) {
 		socks5.Abort(c)
 		return
 	}
-	r.viaTunnel(c, res, socks5.AddrFromAddrPort(sub.Dst), nil)
+	r.viaTunnel(c, res, sub, "", socks5.AddrFromAddrPort(sub.Dst), nil)
 }
 
 func (r *Relay) handleName(c *net.TCPConn) {
@@ -298,7 +302,7 @@ func (r *Relay) handleName(c *net.TCPConn) {
 		if host != "" {
 			dst = socks5.Addr{Host: host, Port: sub.Dst.Port()}
 		}
-		r.viaTunnel(c, res, dst, prefix)
+		r.viaTunnel(c, res, sub, host, dst, prefix)
 	default:
 		socks5.Abort(c)
 	}
@@ -324,31 +328,45 @@ func readName(c *net.TCPConn) ([]byte, sniff.Result) {
 	return buf, res
 }
 
-// pickTunnel returns the first server of the route that can carry the
-// connection: the rule's server, then its fallbacks.
-func (r *Relay) pickTunnel(res rules.Result, udp bool) (Tunnel, string) {
-	if r.cfg.Tunnel == nil {
+// pickTunnel chooses the server of a connection (Config.Pick). host is
+// the name seen in the connection itself ("" = none): a group keeps one
+// site on one server by it, or by the names DNS gave the address.
+func (r *Relay) pickTunnel(res rules.Result, udp bool, sub rules.Subject, host string) (Tunnel, string) {
+	if r.cfg.Pick == nil {
 		return nil, ""
 	}
-	for _, id := range append([]string{res.Profile}, res.Fallback...) {
-		if id == "" {
-			continue
-		}
-		t := r.cfg.Tunnel(id)
-		if t == nil {
-			continue
-		}
-		if udp && t.UDPAvailable() || !udp && t.Available() {
-			return t, id
-		}
+	h := groups.Hint{App: deviceKey(sub), IP: sub.Dst.Addr()}
+	if hasGroup(res) {
+		h.Site = groups.SiteOf(host, r.names(sub.Dst.Addr()))
 	}
-	return nil, ""
+	res, t := r.cfg.Pick(res, udp, h)
+	if t == nil {
+		return nil, ""
+	}
+	return t, res.Profile
 }
 
-func (r *Relay) viaTunnel(c *net.TCPConn, res rules.Result, dst socks5.Addr, prefix []byte) {
-	t, id := r.pickTunnel(res, false)
+// hasGroup reports a group anywhere in a Tunnel result's chain.
+func hasGroup(res rules.Result) bool {
+	return groups.IsGroupID(res.Profile) || slices.ContainsFunc(res.Fallback, groups.IsGroupID)
+}
+
+// deviceKey names the device of a connection for a group that keeps a
+// device's site on one server: its MAC, else its address.
+func deviceKey(sub rules.Subject) string {
+	if !sub.MAC.IsZero() {
+		return "dev:" + sub.MAC.String()
+	}
+	if sub.Src.IsValid() {
+		return "dev:" + sub.Src.String()
+	}
+	return ""
+}
+
+func (r *Relay) viaTunnel(c *net.TCPConn, res rules.Result, sub rules.Subject, host string, dst socks5.Addr, prefix []byte) {
+	t, id := r.pickTunnel(res, false, sub, host)
 	if t == nil {
-		r.log().Info("relay: the server is not available, the connection is refused", "rule", res.Rule, "server", res.Profile)
+		r.log().Info("relay: no server can carry the connection, it is refused", "rule", res.Rule, "server", res.Profile)
 		socks5.Abort(c)
 		return
 	}

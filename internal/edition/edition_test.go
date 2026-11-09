@@ -4,7 +4,7 @@ import "testing"
 
 func TestLimits(t *testing.T) {
 	c := Current
-	if c.DNSCache <= 0 || c.Relay <= 0 || c.Memory < 0 {
+	if c.DNSCache <= 0 || c.Relay <= 0 || c.Memory < 0 || c.GroupRun < 1 {
 		t.Fatalf("%s: %+v", Name, c)
 	}
 	if Lite != (Package == "hyrouter-lite") || Lite == c.VLESS || Lite != (c.Memory > 0) {

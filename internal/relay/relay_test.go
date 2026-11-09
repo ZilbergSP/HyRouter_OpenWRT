@@ -13,6 +13,7 @@ import (
 
 	"golang.org/x/sys/unix"
 
+	"github.com/zilbergsp/hyrouter/internal/groups"
 	"github.com/zilbergsp/hyrouter/internal/rules"
 	"github.com/zilbergsp/hyrouter/internal/socks5"
 )
@@ -62,18 +63,40 @@ func (f fakeTunnel) UDPAssociate(context.Context) (*socks5.UDPAssoc, error) {
 	return nil, errors.New("fake")
 }
 
+// The relay asks Pick for the server, telling a group the device and
+// the site; the server Pick chose is the one dialed.
 func TestPickTunnel(t *testing.T) {
-	ts := map[string]Tunnel{"down": fakeTunnel{}, "tcp": fakeTunnel{up: true}, "both": fakeTunnel{up: true, udp: true}}
-	r := &Relay{cfg: Config{Tunnel: func(id string) Tunnel { return ts[id] }}}
-	res := rules.Result{Action: rules.Tunnel, Profile: "down", Fallback: []string{"gone", "tcp", "both"}}
-	if _, id := r.pickTunnel(res, false); id != "tcp" {
+	var got groups.Hint
+	r := &Relay{cfg: Config{
+		Names: func(netip.Addr) []string { return []string{"r1.cdn.video.example", "video.example"} },
+		Pick: func(res rules.Result, udp bool, h groups.Hint) (rules.Result, Tunnel) {
+			got = h
+			if udp {
+				return res, nil
+			}
+			res.Profile = "srv-b"
+			return res, fakeTunnel{up: true}
+		},
+	}}
+	sub := rules.Subject{Proto: 6, Dst: netip.MustParseAddrPort("198.51.100.1:443"), Src: netip.MustParseAddr("192.168.1.20")}
+	sub.MAC, _ = rules.ParseMAC("aa:bb:cc:dd:ee:01")
+	res := rules.Result{Action: rules.Tunnel, Profile: "grp-0123456789ab"}
+	if tun, id := r.pickTunnel(res, false, sub, ""); tun == nil || id != "srv-b" {
 		t.Errorf("TCP took %q", id)
 	}
-	if _, id := r.pickTunnel(res, true); id != "both" {
-		t.Errorf("UDP took %q", id)
+	if got.App != "dev:aa:bb:cc:dd:ee:01" || got.Site != "video.example" || got.IP != sub.Dst.Addr() {
+		t.Errorf("hint %+v", got)
 	}
-	if tun, id := r.pickTunnel(rules.Result{Action: rules.Tunnel, Profile: "down"}, false); tun != nil || id != "" {
-		t.Errorf("a down server was taken: %q", id)
+	if tun, id := r.pickTunnel(res, true, sub, "www.other.example"); tun != nil || id != "" {
+		t.Errorf("UDP with no server took %q", id)
+	}
+	if got.Site != "other.example" {
+		t.Errorf("the name in the connection is not the site: %+v", got)
+	}
+	// Without a group the site is not worked out.
+	r.pickTunnel(rules.Result{Action: rules.Tunnel, Profile: "srv-a"}, false, rules.Subject{Dst: sub.Dst}, "")
+	if got.Site != "" || got.App != "" {
+		t.Errorf("hint without a group %+v", got)
 	}
 }
 

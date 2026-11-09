@@ -19,7 +19,6 @@ import (
 	"net"
 	"net/http"
 	"net/netip"
-	"slices"
 	"strconv"
 	"sync"
 	"time"
@@ -93,6 +92,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("PATCH /api/servers/{id}", s.authed(s.handleRenameServer))
 	mux.HandleFunc("DELETE /api/servers/{id}", s.authed(s.handleDeleteServer))
 	mux.HandleFunc("PUT /api/main", s.authed(s.handleMain))
+	mux.HandleFunc("POST /api/groups", s.authed(s.handleAddGroup))
+	mux.HandleFunc("PUT /api/groups/{id}", s.authed(s.handleEditGroup))
+	mux.HandleFunc("DELETE /api/groups/{id}", s.authed(s.handleDeleteGroup))
+	mux.HandleFunc("PUT /api/group-probe", s.authed(s.handleGroupProbe))
 	mux.HandleFunc("PUT /api/rules", s.authed(s.handleRules))
 	mux.HandleFunc("PUT /api/devices", s.authed(s.handleDevices))
 	mux.HandleFunc("GET /api/neighbours", s.authed(s.handleNeighbours))
@@ -367,10 +370,7 @@ func (s *Server) handleLog(w http.ResponseWriter, r *http.Request) {
 func (s *Server) edit(w http.ResponseWriter, r *http.Request, change func(*store.State) error, save func(store.State) error, extra map[string]any) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	st := s.Ctl.State()
-	st.Servers = slices.Clone(st.Servers)
-	st.Devices = slices.Clone(st.Devices)
-	st.Settings.LAN = slices.Clone(st.Settings.LAN)
+	st := s.Ctl.State().Clone()
 	if err := change(&st); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return

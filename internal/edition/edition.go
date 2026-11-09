@@ -20,6 +20,10 @@ type Limits struct {
 	Memory int64
 	// VLESS: VLESS servers (Xray) are supported.
 	VLESS bool
+	// GroupRun bounds the members of one server group that run at once
+	// (a process each); a larger group runs its best ones and measures
+	// the others a few at a time.
+	GroupRun int
 }
 
 // SetMemoryLimit applies Current.Memory unless GOMEMLIMIT is set in the

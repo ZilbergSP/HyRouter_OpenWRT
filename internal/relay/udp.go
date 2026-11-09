@@ -171,7 +171,7 @@ func (r *Relay) setUp(f *flow) {
 		refuse("relay: a UDP flow the rules do not send through a tunnel: dropped", "rule", res.Rule)
 		return
 	}
-	t, id := r.pickTunnel(res, true)
+	t, id := r.pickTunnel(res, true, sub, "")
 	if t == nil {
 		refuse("relay: no server carries UDP for the flow: dropped", "rule", res.Rule, "server", res.Profile)
 		return

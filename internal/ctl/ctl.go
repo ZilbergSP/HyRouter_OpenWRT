@@ -26,6 +26,7 @@ import (
 	"github.com/zilbergsp/hyrouter/internal/dnspolicy"
 	"github.com/zilbergsp/hyrouter/internal/dnsproxy"
 	"github.com/zilbergsp/hyrouter/internal/edition"
+	"github.com/zilbergsp/hyrouter/internal/groups"
 	"github.com/zilbergsp/hyrouter/internal/hysteria"
 	"github.com/zilbergsp/hyrouter/internal/kernel"
 	"github.com/zilbergsp/hyrouter/internal/logx"
@@ -64,6 +65,10 @@ type Controller struct {
 	cache    *dnscache.Cache
 	resolver *dnsproxy.Resolver
 	tunnels  *tunnels.Manager
+	groups   *groups.Runtime
+	gview    atomic.Pointer[groupView]
+	gmu      sync.Mutex // scan
+	scan     scanState
 
 	rules   rules.Store
 	policy  atomic.Pointer[dnspolicy.Policy]
@@ -79,6 +84,8 @@ type Controller struct {
 	lastErr string
 	since   time.Time
 	issues  []string
+	// probeStop ends the prober and the scanner of groups.
+	probeStop context.CancelFunc
 }
 
 // New makes a controller that is not routing yet.
@@ -101,9 +108,15 @@ func New(o Options) *Controller {
 	}
 	c.cache.MaxEntries = edition.Current.DNSCache
 	c.route = kernel.PolicyRouting{Mark: nft.MarkTProxy, Mask: nft.MarkTProxy, Table: nft.RouteTable, Priority: nft.RulePriority}
-	c.tunnels = &tunnels.Manager{New: c.newRunner, Log: c.log}
+	c.groups = groups.NewRuntime(c.log)
+	c.tunnels = &tunnels.Manager{New: c.newRunner, Log: c.log, OnHealth: c.noteHealth, OnDial: c.groups.NoteDial}
 	c.resolver = &dnsproxy.Resolver{TunnelDial: c.tunnelDial, Log: c.log}
 	return c
+}
+
+// noteHealth tells the groups when a server connects or goes down.
+func (c *Controller) noteHealth(id string, st hysteria.Status) {
+	c.groups.NoteState(id, st.State == hysteria.Connected)
 }
 
 // newRunner runs a server's core: Hysteria, or Xray for VLESS.
@@ -135,9 +148,14 @@ func (c *Controller) newRunner(p hysteria.Profile, h tunnels.Hooks) tunnels.Runn
 	}
 }
 
-// tunnelDial dials through a running server for DNS (nil = not running).
+// tunnelDial dials through a running server for DNS (nil = not running);
+// a group lends its member.
 func (c *Controller) tunnelDial(profile string) dnsproxy.Dialer {
-	ep := c.tunnels.Get(profile)
+	id := c.memberFor(profile)
+	if id == "" {
+		return nil
+	}
+	ep := c.tunnels.Get(id)
 	if ep == nil || !ep.Available() {
 		return nil
 	}
@@ -148,14 +166,6 @@ func (c *Controller) tunnelDial(profile string) dnsproxy.Dialer {
 		}
 		return ep.Dial(ctx, dst)
 	}
-}
-
-// tunnelFor gives the relay a server's way out (nil when not running).
-func (c *Controller) tunnelFor(profile string) relay.Tunnel {
-	if ep := c.tunnels.Get(profile); ep != nil {
-		return ep
-	}
-	return nil
 }
 
 // Load reads the settings from the store.
@@ -195,12 +205,19 @@ type compiled struct {
 	hasSets  map[int]bool
 	profiles []hysteria.Profile
 	issues   []string
+	// groups are every group with its members expanded; used the ones
+	// the routes use; fallback the servers of routes with fallbacks.
+	groups   []groups.Group
+	used     []string
+	fallback []string
+	probe    *groups.Probe
 }
 
 // compile turns a state into the rule set, the nftables script, the DNS
 // policy and the servers to run. Issues are what matches nothing for now
-// (a missing server, a device not in the table, VLESS in Lite).
-func compile(st store.State) (*compiled, error) {
+// (a missing server or group, a device not in the table, VLESS in Lite).
+// run gives the members of a group that run (nil = its first ones).
+func compile(st store.State, run func(groups.Group) []string) (*compiled, error) {
 	table := rules.DeviceTable{}
 	for _, d := range st.Devices {
 		var a rules.DeviceAddrs
@@ -229,7 +246,17 @@ func compile(st store.State) (*compiled, error) {
 	for _, p := range st.Servers {
 		byID[p.ID] = p
 	}
-	for _, id := range set.Profiles() {
+	out.groups = expandGroups(st)
+	gByID := map[string]groups.Group{}
+	for _, g := range out.groups {
+		gByID[g.ID] = g
+	}
+	seen := map[string]bool{}
+	addServer := func(id string) {
+		if seen[id] {
+			return
+		}
+		seen[id] = true
 		p, ok := byID[id]
 		switch {
 		case !ok:
@@ -240,6 +267,31 @@ func compile(st store.State) (*compiled, error) {
 			out.profiles = append(out.profiles, p)
 		}
 	}
+	for _, id := range set.Profiles() {
+		if !groups.IsGroupID(id) {
+			addServer(id)
+			continue
+		}
+		g, ok := gByID[id]
+		if !ok {
+			out.issues = append(out.issues, "группа "+id+" не найдена: соединения через неё отклоняются")
+			continue
+		}
+		out.used = append(out.used, id)
+		if len(g.Members) == 0 {
+			out.issues = append(out.issues, "в группе «"+g.Name+"» нет серверов: соединения через неё отклоняются")
+			continue
+		}
+		members := firstMembers(g)
+		if run != nil {
+			members = run(g)
+		}
+		for _, m := range members {
+			addServer(m)
+		}
+	}
+	out.fallback = set.FallbackServers()
+	out.probe = st.Groups.Probe
 	plan, def := set.Plan()
 	for _, r := range plan {
 		if !r.Never && r.Sites {
@@ -272,8 +324,31 @@ func (c *Controller) install(cp *compiled) {
 	if cp.policy != nil {
 		c.resolver.Configure(cp.policy.TunnelSpec, cp.policy.DirectSpec)
 	}
+	c.groups.SetGroups(cp.groups)
+	var probe groups.Probe
+	if cp.probe != nil {
+		probe = *cp.probe
+	}
+	_, every := probe.Effective()
+	c.groups.SetInterval(every)
+	c.gview.Store(newGroupView(cp.groups, cp.used, cp.fallback, cp.probe))
 	c.tunnels.Sync(cp.profiles)
 	c.issues = cp.issues
+}
+
+// resync starts and stops servers after the scanner chose a large
+// group's running members again.
+func (c *Controller) resync() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if !c.running {
+		return
+	}
+	cp, err := compile(c.st, c.runMembers)
+	if err != nil {
+		return
+	}
+	c.install(cp)
 }
 
 // Running reports whether HyRouter routes the LAN.
@@ -301,7 +376,7 @@ func (c *Controller) Start(ctx context.Context) error {
 }
 
 func (c *Controller) startLocked(ctx context.Context) error {
-	cp, err := compile(c.st)
+	cp, err := compile(c.st, c.runMembers)
 	if err != nil {
 		return err
 	}
@@ -326,7 +401,7 @@ func (c *Controller) startLocked(ctx context.Context) error {
 		Rules:      c.rules.Load,
 		Names:      c.cache.Names,
 		MAC:        c.neigh.Lookup,
-		Tunnel:     c.tunnelFor,
+		Pick:       c.pick,
 		Limit:      edition.Current.Relay,
 		Log:        c.log,
 	})
@@ -355,6 +430,7 @@ func (c *Controller) startLocked(ctx context.Context) error {
 		return err
 	}
 	c.dns.Refill()
+	c.startProber()
 	for _, i := range cp.issues {
 		c.log.Warn(i)
 	}
@@ -381,6 +457,7 @@ func (c *Controller) stopLocked() error {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	var errs []error
+	c.stopProber()
 	if err := nft.Remove(ctx); err != nil {
 		errs = append(errs, err)
 	}
@@ -425,7 +502,7 @@ func (c *Controller) Apply(ctx context.Context, st store.State) error {
 		}
 		return nil
 	}
-	cp, err := compile(st)
+	cp, err := compile(st, c.runMembers)
 	if err != nil {
 		return err
 	}
@@ -449,7 +526,7 @@ func (c *Controller) Apply(ctx context.Context, st store.State) error {
 // Check compiles a state without applying it: the web interface saves
 // nothing the controller would refuse.
 func Check(st store.State) error {
-	_, err := compile(st)
+	_, err := compile(st, nil)
 	return err
 }
 
@@ -461,6 +538,7 @@ type Status struct {
 	Error   string           `json:"error,omitempty"`
 	Issues  []string         `json:"issues"`
 	Servers []tunnels.Status `json:"servers"`
+	Groups  []GroupStatus    `json:"groups"`
 	Relay   int64            `json:"relay"`
 }
 
@@ -479,5 +557,6 @@ func (c *Controller) Status() Status {
 	if st.Servers == nil {
 		st.Servers = []tunnels.Status{}
 	}
+	st.Groups = c.groupStatuses()
 	return st
 }

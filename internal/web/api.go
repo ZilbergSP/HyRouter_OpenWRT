@@ -15,6 +15,7 @@ import (
 
 	"github.com/zilbergsp/hyrouter/internal/dnspolicy"
 	"github.com/zilbergsp/hyrouter/internal/edition"
+	"github.com/zilbergsp/hyrouter/internal/groups"
 	"github.com/zilbergsp/hyrouter/internal/hysteria"
 	"github.com/zilbergsp/hyrouter/internal/rules"
 	"github.com/zilbergsp/hyrouter/internal/store"
@@ -29,14 +30,17 @@ type presetView struct {
 // stateView is the settings as the interface sees them: the servers'
 // passwords never leave the router.
 type stateView struct {
-	Edition  string             `json:"edition"`
-	Lite     bool               `json:"lite"`
-	VLESS    bool               `json:"vless"`
-	Settings store.Settings     `json:"settings"`
-	Servers  []hysteria.Profile `json:"servers"`
-	Rules    rules.Config       `json:"rules"`
-	Devices  []store.Device     `json:"devices"`
-	Presets  []presetView       `json:"dnsPresets"`
+	Edition    string             `json:"edition"`
+	Lite       bool               `json:"lite"`
+	VLESS      bool               `json:"vless"`
+	GroupRun   int                `json:"groupRun"`
+	Settings   store.Settings     `json:"settings"`
+	Servers    []hysteria.Profile `json:"servers"`
+	Rules      rules.Config       `json:"rules"`
+	Devices    []store.Device     `json:"devices"`
+	Groups     groups.File        `json:"groups"`
+	Strategies []presetView       `json:"strategies"`
+	Presets    []presetView       `json:"dnsPresets"`
 }
 
 func (s *Server) view(st store.State) stateView {
@@ -44,10 +48,15 @@ func (s *Server) view(st store.State) stateView {
 		Edition:  edition.Name,
 		Lite:     edition.Lite,
 		VLESS:    edition.Current.VLESS,
+		GroupRun: edition.Current.GroupRun,
 		Settings: st.Settings,
 		Rules:    st.Rules,
 		Devices:  st.Devices,
+		Groups:   st.Groups,
 		Servers:  make([]hysteria.Profile, 0, len(st.Servers)),
+	}
+	for _, g := range []groups.Strategy{groups.Failover, groups.Latency, groups.RoundRobin, groups.Random, groups.Sticky} {
+		v.Strategies = append(v.Strategies, presetView{string(g), groups.StrategyLabel(g)})
 	}
 	for _, p := range st.Servers {
 		p.ClearSecrets()
@@ -100,6 +109,9 @@ func (s *Server) handleRouting(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) saveServers(st store.State) error {
 	if err := s.Store.SaveServers(st.Servers); err != nil {
+		return err
+	}
+	if err := s.Store.SaveGroups(st.Groups); err != nil {
 		return err
 	}
 	return s.Store.SaveSettings(st.Settings)
@@ -177,8 +189,9 @@ func (s *Server) handleRenameServer(w http.ResponseWriter, r *http.Request) {
 	}, s.saveServers, nil)
 }
 
-// handleDeleteServer removes a server. Rules that name it are kept: their
-// traffic is refused until another server is chosen.
+// handleDeleteServer removes a server, also from its groups. Rules that
+// name it are kept: their traffic is refused until another server is
+// chosen.
 func (s *Server) handleDeleteServer(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	s.edit(w, r, func(st *store.State) error {
@@ -186,12 +199,13 @@ func (s *Server) handleDeleteServer(w http.ResponseWriter, r *http.Request) {
 		if i < 0 {
 			return errors.New("нет такого сервера")
 		}
+		if st.Servers[i].Source != "" && !st.Servers[i].Missing {
+			return errors.New("сервер подписки удаляется вместе с подпиской")
+		}
 		st.Servers = slices.Delete(st.Servers, i, i+1)
+		st.Groups.Prune(func(m string) bool { return m != id })
 		if st.Settings.Main == id {
-			st.Settings.Main = ""
-			if len(st.Servers) > 0 {
-				st.Settings.Main = st.Servers[0].ID
-			}
+			st.Settings.Main = firstTarget(st)
 		}
 		return nil
 	}, s.saveServers, nil)
@@ -206,8 +220,8 @@ func (s *Server) handleMain(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.edit(w, r, func(st *store.State) error {
-		if !slices.ContainsFunc(st.Servers, func(p hysteria.Profile) bool { return p.ID == req.ID }) {
-			return errors.New("нет такого сервера")
+		if !isTarget(st, req.ID) {
+			return errors.New("нет такого сервера или группы")
 		}
 		st.Settings.Main = req.ID
 		return nil
