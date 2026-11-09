@@ -10,7 +10,9 @@ import (
 	"errors"
 	"fmt"
 	"net/netip"
+	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"time"
 
@@ -222,6 +224,11 @@ func (p *Profile) Validate() error {
 	if e := p.TLS.ECH; e != "" && !ECHInline(e) && !localDrivePath(e) {
 		return errors.New("ECH: нужен список ECHConfigList в base64 или полный путь к файлу на локальном диске")
 	}
+	// The CA file too is read by Hysteria with HyRoute's rights: a local
+	// file only. It is plain text in profiles.json.
+	if ca := p.TLS.CA; ca != "" && !localFilePath(ca) {
+		return errors.New("CA: нужен полный путь к файлу на локальном диске")
+	}
 	// Hysteria refuses to start with a shorter one (0 is its default).
 	for _, d := range []string{p.Hop.Interval, p.Hop.MinInterval, p.Hop.MaxInterval} {
 		if v, _ := time.ParseDuration(d); v != 0 && v < hy2uri.MinHopInterval {
@@ -265,6 +272,16 @@ func localDrivePath(s string) bool {
 	}
 	c := s[0] | 0x20
 	return c >= 'a' && c <= 'z' && s[1] == ':' && s[2] == '\\' && !strings.Contains(s[2:], ":")
+}
+
+// localFilePath: a full path to a local file: localDrivePath (on any
+// system: profiles and backups made on Windows are read elsewhere too),
+// or an absolute path outside Windows.
+func localFilePath(s string) bool {
+	if localDrivePath(s) {
+		return true
+	}
+	return runtime.GOOS != "windows" && s == strings.TrimSpace(s) && filepath.IsAbs(s)
 }
 
 // ValidPin accepts the formats Hysteria normalizes: hex with optional ':'

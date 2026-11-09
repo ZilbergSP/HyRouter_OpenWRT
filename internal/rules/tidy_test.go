@@ -181,3 +181,41 @@ func TestTidyGeo(t *testing.T) {
 		t.Fatalf("%v", g)
 	}
 }
+
+// A program rule «with its children» between two others may take their
+// programs (a game started by Steam): no merge moves past it.
+func TestTidyMergeInheritChildren(t *testing.T) {
+	withGeo(t, fakeGeo{})
+	c := Config{DefaultAction: Direct, Rules: []Rule{
+		{ID: "g1", Apps: []AppMatch{{Pattern: "game1.exe"}}, Action: Direct},
+		{ID: "steam", Apps: []AppMatch{{Pattern: "steam.exe", InheritChildren: true}}, Action: Tunnel},
+		{ID: "g2", Apps: []AppMatch{{Pattern: "game2.exe"}}, Action: Direct},
+	}}
+	for _, it := range TidyRules(c, TidyOptions{}).Items {
+		if it.Kind == TidyMerge {
+			t.Fatalf("%+v", it)
+		}
+	}
+}
+
+// A drop or a site that goes because a geosite list holds it is a change:
+// the list comes and goes with the rule database, so it is not ticked.
+func TestTidyGeoDependsIsChange(t *testing.T) {
+	withGeo(t, fakeGeo{})
+	c := Config{DefaultAction: Direct, Rules: []Rule{
+		{ID: "yt", Domains: []string{"geosite:youtube"}, Action: Tunnel},
+		{ID: "yt2", Domains: []string{".youtube.com"}, Action: Tunnel},
+		{ID: "a", Domains: []string{".a.com"}, Action: Direct},
+		{ID: "a2", Domains: []string{"x.a.com"}, Action: Direct},
+	}}
+	got := map[string]bool{}
+	for _, it := range TidyRules(c, TidyOptions{}).Items {
+		got[it.ID] = it.Changes
+	}
+	if c, ok := got["drop:yt2"]; !ok || !c {
+		t.Fatalf("geosite drop: %v", got)
+	}
+	if c, ok := got["drop:a2"]; !ok || c {
+		t.Fatalf("plain drop: %v", got)
+	}
+}
