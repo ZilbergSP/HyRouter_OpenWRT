@@ -20,6 +20,7 @@ func startProcess(exe string, args, env []string, out io.Writer) (process, error
 	cmd.Env = env
 	cmd.Stdout = out
 	cmd.Stderr = out
+	childAttrs(cmd)
 	if err := cmd.Start(); err != nil {
 		return nil, err
 	}

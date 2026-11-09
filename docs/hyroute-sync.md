@@ -17,7 +17,7 @@ internal/<пакет>`, перенести нужное, поправить в �
 | `geodata` | 01032d2 | как есть |
 | `groups` | 01032d2 | как есть |
 | `hy2uri` | 01032d2 | как есть |
-| `hysteria` | 01032d2 | как есть (с `child.go` из v1.3.21 для `nfqws2`); запуск процессов на Linux — этап 2 |
+| `hysteria` | 01032d2 | как есть (с `child.go` из v1.3.21 для `nfqws2`); на Linux ядро получает `Pdeathsig` и не переживает hyrouterd (`attrs_linux.go`, вызов в `process_other.go`) |
 | `logx` | 01032d2 | как есть |
 | `procinfo` | 01032d2 | только `procinfo.go`: тип `Info` для условия «программы» в `rules` (на роутере не используется) |
 | `release` | 01032d2 | как есть |
