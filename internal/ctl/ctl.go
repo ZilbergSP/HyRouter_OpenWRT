@@ -160,6 +160,9 @@ func (c *Controller) noteHealth(id string, st hysteria.Status) {
 
 // newRunner runs a server's core: Hysteria, or Xray for VLESS.
 func (c *Controller) newRunner(p hysteria.Profile, h tunnels.Hooks) tunnels.Runner {
+	if r := c.embedded(p, h); r != nil {
+		return r
+	}
 	name := cores.Hysteria
 	if p.IsVLESS() {
 		name = cores.Xray
@@ -466,6 +469,9 @@ func (c *Controller) startLocked(ctx context.Context) error {
 	}
 	// The cores of the servers in use, before any traffic waits for them.
 	for _, p := range cp.profiles {
+		if !needsCore(p) {
+			continue
+		}
 		name := cores.Hysteria
 		if p.IsVLESS() {
 			name = cores.Xray
@@ -606,6 +612,9 @@ func (c *Controller) Apply(ctx context.Context, st store.State) error {
 		return err
 	}
 	for _, p := range cp.profiles {
+		if !needsCore(p) {
+			continue
+		}
 		name := cores.Hysteria
 		if p.IsVLESS() {
 			name = cores.Xray

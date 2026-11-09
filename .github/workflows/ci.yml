@@ -112,12 +112,19 @@ jobs:
       - name: hyrouterd and the pinned Hysteria
         run: |
           CGO_ENABLED=0 go build -o "$RUNNER_TEMP/hyrouterd" ./cmd/hyrouterd
-          curl -fsSL "$(jq -r .hysteria.assets.amd64.url build/deps.json)" -o "$RUNNER_TEMP/hysteria"
+          curl -fsSL --retry 4 --retry-all-errors "$(jq -r .hysteria.assets.amd64.url build/deps.json)" -o "$RUNNER_TEMP/hysteria"
           echo "$(jq -r .hysteria.assets.amd64.sha256 build/deps.json)  $RUNNER_TEMP/hysteria" | sha256sum -c
           chmod +x "$RUNNER_TEMP/hysteria"
           sudo apt-get install -y -qq nftables dnsmasq-base >/dev/null
       - name: Routing in network namespaces
         run: sudo bash test/netns.sh "$RUNNER_TEMP/hyrouterd" "$RUNNER_TEMP/hysteria" "$(jq -r .hysteria.version build/deps.json)"
+      # HyRouter Lite: the same checks with the Hysteria client inside
+      # hyrouterd (internal/hycore) and no hysteria binary on the router.
+      - name: Routing in network namespaces, HyRouter Lite
+        if: ${{ !cancelled() }}
+        run: |
+          CGO_ENABLED=0 go build -tags lite -o "$RUNNER_TEMP/hyrouterd-lite" ./cmd/hyrouterd
+          sudo HYROUTER_EMBEDDED=1 bash test/netns.sh "$RUNNER_TEMP/hyrouterd-lite" "$RUNNER_TEMP/hysteria" "$(jq -r .hysteria.version build/deps.json)"
   # The packages of both editions, installed on OpenWrt 24.10 (opkg) and
   # 25.12 (apk) in the official rootfs images.
   packages:

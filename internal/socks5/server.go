@@ -20,6 +20,9 @@ type Server struct {
 	Dial func(network, addr string) (net.Conn, error)
 	// OnConnect is called for every CONNECT request (logging, tests).
 	OnConnect func(dst Addr)
+	// UDP, when set, gives every UDP association its session instead of
+	// sockets of its own: HyRouter Lite's Hysteria client in hyrouterd.
+	UDP func() (UDPSession, error)
 
 	ln     net.Listener
 	wg     sync.WaitGroup
@@ -196,6 +199,10 @@ func (s *Server) associate(c net.Conn) {
 		return
 	}
 	defer pc.Close()
+	if s.UDP != nil {
+		s.associateSession(c, pc)
+		return
+	}
 	out, err := net.ListenUDP("udp", nil)
 	if err != nil {
 		reply(c, 1, Addr{})
@@ -246,6 +253,71 @@ func (s *Server) associate(c net.Conn) {
 			continue
 		}
 		out.WriteToUDP(payload, ua)
+	}
+}
+
+// UDPSession carries an association's datagrams elsewhere: Send to a
+// "host:port", Receive with the sender's "host:port" (Hysteria's
+// HyUDPConn).
+type UDPSession interface {
+	Send(payload []byte, dst string) error
+	Receive() (payload []byte, from string, err error)
+	Close() error
+}
+
+// associateSession relays one association through a UDPSession until the
+// control connection closes.
+func (s *Server) associateSession(c net.Conn, pc *net.UDPConn) {
+	sess, err := s.UDP()
+	if err != nil {
+		reply(c, 1, Addr{})
+		return
+	}
+	defer sess.Close()
+	reply(c, 0, AddrFromAddrPort(pc.LocalAddr().(*net.UDPAddr).AddrPort()))
+	_ = c.SetDeadline(time.Time{})
+	go func() {
+		io.Copy(io.Discard, c)
+		pc.Close()
+		sess.Close()
+	}()
+	var client atomic.Pointer[net.UDPAddr]
+	go func() {
+		for {
+			payload, from, err := sess.Receive()
+			if err != nil {
+				return
+			}
+			to := client.Load()
+			if to == nil {
+				continue
+			}
+			src, err := ParseHostPort(from)
+			if err != nil {
+				continue
+			}
+			hdr, err := AppendAddr([]byte{0, 0, 0}, src)
+			if err != nil {
+				continue
+			}
+			pc.WriteToUDP(append(hdr, payload...), to)
+		}
+	}()
+	buf := make([]byte, 65535)
+	for {
+		n, from, err := pc.ReadFromUDP(buf)
+		if err != nil {
+			return
+		}
+		if cur := client.Load(); cur != nil && !(from.IP.Equal(cur.IP) && from.Port == cur.Port) {
+			continue
+		}
+		client.Store(from)
+		dst, payload, err := ParseUDPHeader(buf[:n])
+		if err != nil {
+			continue
+		}
+		sess.Send(append([]byte(nil), payload...), dst.String())
 	}
 }
 

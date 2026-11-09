@@ -9,6 +9,9 @@
 # routes, and a mistake would cut the machine's network).
 #
 #   sudo test/netns.sh HYROUTERD HYSTERIA HYSTERIA_VERSION
+#
+# With HYROUTER_EMBEDDED=1 (HyRouter Lite) the router gets no hysteria
+# binary: its client runs inside hyrouterd, and HYSTERIA is the server only.
 set -euo pipefail
 
 HYROUTERD=$1
@@ -148,7 +151,10 @@ ip netns exec rtr dnsmasq --keep-in-foreground --no-resolv --no-hosts --bind-int
 	--address=/vpn.test/203.0.113.30 --address=/a.test/203.0.113.40 --address=/b.test/203.0.113.40 &
 PIDS+=($!)
 mkdir -p "$W/etc" /usr/share/hyrouter/bin
-install -m 0755 "$HYSTERIA" "/usr/share/hyrouter/bin/hysteria-${HYVERSION//\//-}"
+rm -f /usr/share/hyrouter/bin/hysteria-*
+if [ "${HYROUTER_EMBEDDED:-0}" != 1 ]; then
+	install -m 0755 "$HYSTERIA" "/usr/share/hyrouter/bin/hysteria-${HYVERSION//\//-}"
+fi
 cat >"$W/etc/settings.json" <<'EOF'
 {"enabled": true, "lan": ["br-lan"], "main": "srv-ci", "dns": {"byRules": false}}
 EOF
