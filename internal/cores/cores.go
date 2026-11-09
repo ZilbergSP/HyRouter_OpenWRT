@@ -3,7 +3,8 @@
 // Package cores installs the proxy cores hyrouterd runs: the official
 // Hysteria and Xray builds pinned in build/deps.json. A core is
 // downloaded the first time it is needed and checked against its SHA-256
-// before it is ever started; the package carries none of them.
+// before it is ever started; the package carries none of them. A newer
+// release of a core may replace the pinned one (updates.go).
 package cores
 
 import (
@@ -19,6 +20,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -83,8 +85,13 @@ type Installer struct {
 	Client *http.Client
 	// Arch is the architecture to install for ("" = runtime.GOARCH).
 	Arch string
+	// Version runs a core's "version" (hysteria.ExeVersion and
+	// XrayVersion): a downloaded update must start and name itself.
+	Version func(name, path string) (string, error)
 
-	mu sync.Mutex
+	mu      sync.Mutex
+	updates map[string]*coreState // updates.json (updates.go)
+	hashOK  map[string]string     // path|mtime|size → its checked SHA-256
 }
 
 // freeSpace is the room left on the file system of dir (tests replace it).
@@ -100,12 +107,19 @@ var freeSpace = func(dir string) int64 {
 	}
 }
 
-// Path returns the file of a core, downloading and checking it first
-// when it is not there yet.
+// Path returns the file of a core: an update installed from the core's
+// releases (updates.go) while it checks out, else the pinned one,
+// downloaded and checked first when it is not there yet.
 func (in *Installer) Path(ctx context.Context, name string) (string, error) {
 	c, err := Pinned(name)
 	if err != nil {
 		return "", err
+	}
+	in.mu.Lock()
+	p := in.updated(name, c.Version)
+	in.mu.Unlock()
+	if p != "" {
+		return p, nil
 	}
 	return in.install(ctx, name, c)
 }
@@ -142,7 +156,7 @@ func (in *Installer) install(ctx context.Context, name string, c Core) (string, 
 	if err := in.download(ctx, a, p); err != nil {
 		return "", fmt.Errorf("не удалось скачать %s %s: %w", name, c.Version, err)
 	}
-	prune(dir, name+"-", file)
+	prune(dir, name+"-", append(in.keep(name), file)...)
 	return p, nil
 }
 
@@ -230,14 +244,14 @@ func (in *Installer) download(ctx context.Context, a Asset, dst string) error {
 
 // prune removes other versions of a core (files starting with prefix,
 // other than keep) and what interrupted downloads left in dir.
-func prune(dir, prefix, keep string) {
+func prune(dir, prefix string, keep ...string) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return
 	}
 	for _, e := range entries {
 		n := e.Name()
-		if n != keep && (strings.HasPrefix(n, prefix) || strings.HasPrefix(n, ".download-") || strings.HasPrefix(n, ".core-")) {
+		if !slices.Contains(keep, n) && (strings.HasPrefix(n, prefix) || strings.HasPrefix(n, ".download-") || strings.HasPrefix(n, ".core-")) {
 			os.Remove(filepath.Join(dir, n))
 		}
 	}

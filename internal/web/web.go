@@ -120,6 +120,11 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/neighbours", s.authed(s.handleNeighbours))
 	mux.HandleFunc("PUT /api/settings", s.authed(s.handleSettings))
 	mux.HandleFunc("GET /api/log", s.authed(s.handleLog))
+	mux.HandleFunc("GET /api/updates", s.authed(s.handleUpdates))
+	mux.HandleFunc("POST /api/updates/check", s.authed(s.handleUpdatesCheck))
+	mux.HandleFunc("POST /api/updates/install", s.authed(s.handleUpdateInstall))
+	mux.HandleFunc("POST /api/updates/cores/{name}", s.authed(s.handleCoreInstall))
+	mux.HandleFunc("POST /api/updates/cores/{name}/rollback", s.authed(s.handleCoreRollback))
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "нет такого запроса")
 	})

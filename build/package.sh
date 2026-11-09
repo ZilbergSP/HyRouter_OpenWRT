@@ -12,6 +12,7 @@
 #
 # HYROUTER_TEST_ENTWARE=1 adds a KeeneticOS package for Entware's x64-3.2,
 # which no router uses: CI installs it in Entware on Linux.
+# HYROUTER_ONLY limits the package architectures built (see below).
 set -euo pipefail
 
 VERSION=$1
@@ -76,6 +77,18 @@ zapret() {
 
 for t in "${TARGETS[@]}"; do
 	read -r platform pkg goarch extra archs <<<"$t"
+	# HYROUTER_ONLY="x86_64 x64-3.2" builds only those package
+	# architectures (CI's upgrade test).
+	if [ -n "${HYROUTER_ONLY:-}" ]; then
+		keep=""
+		for a in $archs; do
+			case " $HYROUTER_ONLY " in
+			*" $a "*) keep="$keep $a" ;;
+			esac
+		done
+		[ -n "$keep" ] || continue
+		archs=$keep
+	fi
 	bin="$OUT/bin/$pkg-$goarch"
 	tags=()
 	case $pkg in

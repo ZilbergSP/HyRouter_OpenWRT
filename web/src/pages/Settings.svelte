@@ -3,6 +3,7 @@
   import type { StateView } from '../lib/types';
   import Geo from './Geo.svelte';
   import Backup from './Backup.svelte';
+  import Updates from './Updates.svelte';
 
   let {
     view,
@@ -93,6 +94,8 @@
   {#if saved}<div class="notice ok">Настройки сохранены.</div>{/if}
   <button class="primary" type="submit" disabled={busy}>{busy ? 'Сохраняю…' : 'Сохранить'}</button>
 </form>
+
+<Updates />
 
 <Geo {view} {onstate} />
 

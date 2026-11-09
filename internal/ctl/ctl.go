@@ -114,6 +114,10 @@ type Controller struct {
 	restore restoreState
 	// zap is the DPI bypass.
 	zap zapretCtl
+	// upd: updates of HyRouter and of the cores (updates.go).
+	upd updatesCtl
+	// inUse: the servers the routing runs (install).
+	inUse atomic.Pointer[[]hysteria.Profile]
 }
 
 // New makes a controller that is not routing yet.
@@ -123,7 +127,7 @@ func New(o Options) *Controller {
 		log:      o.Log,
 		redactor: o.Redactor,
 		version:  o.Version,
-		cores:    &cores.Installer{Dir: CoresDir},
+		cores:    &cores.Installer{Dir: CoresDir, Version: coreVersion},
 		cache:    dnscache.New(),
 	}
 	if c.log == nil {
@@ -245,6 +249,7 @@ func (c *Controller) Run(ctx context.Context) {
 	go c.runGeo(ctx)
 	go c.runStats(ctx)
 	go c.runZapretHeal(ctx)
+	go c.runUpdates(ctx)
 	c.kickGeo()
 	<-ctx.Done()
 }
@@ -400,6 +405,7 @@ func (c *Controller) install(cp *compiled) {
 	_, every := probe.Effective()
 	c.groups.SetInterval(every)
 	c.gview.Store(newGroupView(cp.groups, cp.used, cp.fallback, cp.probe))
+	c.inUse.Store(&cp.profiles)
 	c.tunnels.Sync(cp.profiles)
 	c.issues = cp.issues
 }
@@ -672,12 +678,15 @@ type Status struct {
 	Guard bool `json:"guard"`
 	// Platform is the router's system: "openwrt" or "keenetic".
 	Platform string `json:"platform"`
+	// Update is the newer HyRouter on offer ("" = none).
+	Update string `json:"update,omitempty"`
 }
 
 // Status reports the state of routing.
 func (c *Controller) Status() Status {
 	c.mu.Lock()
-	st := Status{Edition: edition.Name, Platform: platform.ID, Running: c.running, Since: c.since, Error: c.lastErr, Issues: slices.Clone(c.issues)}
+	st := Status{Edition: edition.Name, Platform: platform.ID, Running: c.running, Since: c.since, Error: c.lastErr, Issues: slices.Clone(c.issues),
+		Update: c.availableUpdate()}
 	if c.relay != nil {
 		st.Relay = c.relay.Active()
 	}

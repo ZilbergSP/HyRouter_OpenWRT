@@ -200,9 +200,29 @@ jobs:
         run: |
           HYROUTER_TEST_ENTWARE=1 bash build/package.sh 0.0.0 "$RUNNER_TEMP/out"
           docker run --rm -v "$RUNNER_TEMP/out:/out" alpine:3.24.4 /bin/sh /out/apk.sh
+      # The upgrade test: packages of 0.0.1 (x86_64, Entware x64) and a fake
+      # GitHub API on the runner that offers them as release v0.0.1 with
+      # their SHA256SUMS; the containers reach it as host.docker.internal
+      # (hyrouterd -update reads HYROUTER_RELEASES_API).
+      - name: A release of the next version (the upgrade test)
+        run: |
+          HYROUTER_TEST_ENTWARE=1 HYROUTER_ONLY="x86_64 x64-3.2" bash build/package.sh 0.0.1 "$RUNNER_TEMP/next"
+          docker run --rm -v "$RUNNER_TEMP/next:/out" alpine:3.24.4 /bin/sh /out/apk.sh
+          rel="$RUNNER_TEMP/rel"
+          mkdir -p "$rel/dl" "$rel/repos/ZilbergSP/HyRouter_OpenWRT"
+          cp "$RUNNER_TEMP/next/packages/"* "$rel/dl/"
+          (cd "$rel/dl" && sha256sum -- * >SHA256SUMS && ls) >"$RUNNER_TEMP/names"
+          jq -n --arg base http://host.docker.internal:8099/dl/ --rawfile names "$RUNNER_TEMP/names" \
+            '[{tag_name: "v0.0.1", prerelease: true, body: "test", html_url: "http://host.docker.internal:8099/",
+               assets: ($names | split("\n") | map(select(. != "")) | map({name: ., browser_download_url: ($base + .), size: 0}))}]' \
+            >"$rel/repos/ZilbergSP/HyRouter_OpenWRT/releases"
+          cat "$rel/repos/ZilbergSP/HyRouter_OpenWRT/releases"
+          nohup python3 -m http.server 8099 --bind 0.0.0.0 --directory "$rel" >"$RUNNER_TEMP/http.log" 2>&1 &
+          sleep 2
+          curl -fsS http://127.0.0.1:8099/repos/ZilbergSP/HyRouter_OpenWRT/releases >/dev/null
       - name: Install on OpenWrt 24.10 (opkg)
         run: |
-          docker run --rm --cap-add NET_ADMIN -v "$RUNNER_TEMP/out/packages:/p:ro" openwrt/rootfs:x86-64-24.10.8 /bin/sh -c '
+          docker run --rm --cap-add NET_ADMIN --add-host=host.docker.internal:host-gateway -v "$RUNNER_TEMP/out/packages:/p:ro" openwrt/rootfs:x86-64-24.10.8 /bin/sh -c '
             set -e
             mkdir -p /var/lock
             opkg update >/dev/null
@@ -213,6 +233,16 @@ jobs:
             test -x /usr/share/hyrouter/zapret/nfqws2
             test -f /usr/share/hyrouter/zapret/lua/zapret-lib.lua
             test -f /usr/share/hyrouter/zapret/blobs/tls_clienthello_vk_com.bin
+            echo kept >/etc/hyrouter/keep-me
+            # «Обновить»: hyrouterd -update takes v0.0.1 from the fake release
+            # and the package manager upgrades to it in a session of its own.
+            HYROUTER_RELEASES_API=http://host.docker.internal:8099 hyrouterd -update
+            for i in $(seq 1 180); do grep -q "^== exit" /tmp/hyrouter/update.log 2>/dev/null && break; sleep 1; done
+            cat /tmp/hyrouter/update.log
+            grep -q "^== exit 0" /tmp/hyrouter/update.log
+            hyrouterd -version | grep -q "hyrouterd 0.0.1"
+            grep -A3 "^Package: hyrouter$" /usr/lib/opkg/status | grep -q "Version: 0.0.1-1"
+            test -f /etc/hyrouter/keep-me
             # The kill switch at boot closes the LAN interfaces of the settings.
             echo "{\"enabled\":true,\"killSwitch\":true,\"lan\":[\"br-lan\",\"br-guest\"]}" >/etc/hyrouter/settings.json
             /etc/init.d/hyrouter-guard boot
@@ -227,13 +257,20 @@ jobs:
             if nft list table inet hyrouter_guard >/dev/null 2>&1; then echo "the guard stayed"; exit 1; fi'
       - name: Install on OpenWrt 25.12 (apk)
         run: |
-          docker run --rm -v "$RUNNER_TEMP/out/packages:/p:ro" openwrt/rootfs:x86-64-25.12.6 /bin/sh -c '
+          docker run --rm --add-host=host.docker.internal:host-gateway -v "$RUNNER_TEMP/out/packages:/p:ro" openwrt/rootfs:x86-64-25.12.6 /bin/sh -c '
             set -e
             apk update >/dev/null
             apk add --allow-untrusted /p/hyrouter-0.0.0-r1_x86_64.apk
             hyrouterd -version
             sh -n /etc/init.d/hyrouter
             sh -n /etc/init.d/hyrouter-guard
+            # «Обновить»: hyrouterd -update takes v0.0.1 from the fake release
+            # and the package manager upgrades to it in a session of its own.
+            HYROUTER_RELEASES_API=http://host.docker.internal:8099 hyrouterd -update
+            for i in $(seq 1 180); do grep -q "^== exit" /tmp/hyrouter/update.log 2>/dev/null && break; sleep 1; done
+            cat /tmp/hyrouter/update.log
+            grep -q "^== exit 0" /tmp/hyrouter/update.log
+            hyrouterd -version | grep -q "hyrouterd 0.0.1"
             apk del hyrouter
             test ! -e /usr/bin/hyrouterd'
       # KeeneticOS: Entware for x64 (the same packages as the routers' ones,
@@ -241,7 +278,7 @@ jobs:
       # answers; the firmware itself is not there.
       - name: Install in Entware (KeeneticOS package)
         run: |
-          docker run --rm -v "$RUNNER_TEMP/out/packages:/p:ro" debian:bookworm-slim /bin/sh -c '
+          docker run --rm --add-host=host.docker.internal:host-gateway -v "$RUNNER_TEMP/out/packages:/p:ro" debian:bookworm-slim /bin/sh -c '
             set -e
             apt-get update -qq >/dev/null
             apt-get install -y -qq wget ca-certificates >/dev/null
@@ -265,6 +302,20 @@ jobs:
             done
             if [ -z "$ok" ]; then cat /tmp/hyrouter/hyrouterd.log; echo "the interface did not answer"; exit 1; fi
             /opt/etc/init.d/S99hyrouter status
+            # «Обновить»: hyrouterd -update takes v0.0.1 from the fake release
+            # and the package manager upgrades to it in a session of its own.
+            HYROUTER_RELEASES_API=http://host.docker.internal:8099 hyrouterd -update
+            for i in $(seq 1 180); do grep -q "^== exit" /tmp/hyrouter/update.log 2>/dev/null && break; sleep 1; done
+            cat /tmp/hyrouter/update.log
+            grep -q "^== exit 0" /tmp/hyrouter/update.log
+            hyrouterd -version | grep -q "hyrouterd 0.0.1"
+            # The package restarted the service: the new hyrouterd answers.
+            ok=""
+            for i in $(seq 1 20); do
+              if wget -qO- http://127.0.0.1:8088/api/session | grep -q 0.0.1; then ok=1; break; fi
+              sleep 1
+            done
+            if [ -z "$ok" ]; then cat /tmp/hyrouter/hyrouterd.log; echo "the new version does not answer"; exit 1; fi
             opkg remove hyrouter-keenetic
             test ! -e /opt/sbin/hyrouterd
             if wget -qO- -T 2 http://127.0.0.1:8088/api/session >/dev/null 2>&1; then echo "still running"; exit 1; fi'

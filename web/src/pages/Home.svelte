@@ -42,6 +42,10 @@
 <h1>Главная</h1>
 <p class="lead">{view.edition}: маршрутизация устройств сети по правилам.</p>
 
+{#if status.update}
+  <div class="notice ok">Вышла версия HyRouter {status.update}. <a href="#/settings">Обновить в настройках</a></div>
+{/if}
+
 <div class="notice">
   Бета-версия: проверена в CI, но не на настоящих роутерах. Держите доступ к роутеру по SSH, чтобы выключить HyRouter
   командой <code>{view.stopCommand}</code>, если сеть перестанет работать.

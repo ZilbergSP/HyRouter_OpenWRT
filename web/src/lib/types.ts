@@ -311,6 +311,65 @@ export interface Status {
   groups: GroupStatus[];
   relay: number;
   guard: boolean;
+  update?: string;
+}
+
+export interface AvailableUpdate {
+  version: string;
+  notes: string;
+  published: string;
+  page: string;
+  asset: string;
+  size: number;
+}
+
+export interface UpdateResult {
+  from: string;
+  to: string;
+  at: string;
+  ok: boolean;
+  done: boolean;
+  lines: string[] | null;
+}
+
+export interface CoreUpdate {
+  name: string;
+  version: string;
+  notes: string;
+  published: string;
+  page: string;
+}
+
+export interface CoreView {
+  name: string;
+  title: string;
+  version: string;
+  pinned: string;
+  updated: boolean;
+  previous?: string;
+  error?: string;
+  update?: CoreUpdate;
+  checkError?: string;
+  busy: boolean;
+  progress: number;
+  note?: string;
+  failed?: boolean;
+}
+
+export interface UpdatesView {
+  version: string;
+  dev: boolean;
+  package?: string;
+  checked?: string;
+  checking: boolean;
+  error?: string;
+  update?: AvailableUpdate;
+  stage?: string;
+  progress: number;
+  installError?: string;
+  result?: UpdateResult;
+  embedded: boolean;
+  cores: CoreView[];
 }
 
 export interface Session {
