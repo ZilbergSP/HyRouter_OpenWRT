@@ -7,7 +7,7 @@
 HyRouter — версия [HyRoute](https://github.com/lardan099/HyRoute) для роутеров. Модель правил, разбор ссылок и подписок, группы серверов, DNS, статистика и обход DPI взяты из HyRoute. Вместо программ на компьютере правила различают устройства в сети.
 
 > [!WARNING]
-> **Бета.** v0.4.0 проверена только в CI: в сетевых пространствах имён Linux с настоящим сервером Hysteria 2 (обе редакции) и установкой пакетов в официальные образы OpenWrt 24.10 и 25.12. На настоящих роутерах она не проверялась. Ставьте её только туда, где сможете вернуть сеть: команда `/etc/init.d/hyrouter stop` по SSH снимает все правила HyRouter (с блокировкой при загрузке — ещё и `/etc/init.d/hyrouter-guard disable`).
+> **Бета.** v0.5.0 проверена только в CI: в сетевых пространствах имён Linux с настоящим сервером Hysteria 2 (обе редакции, OpenWrt и Кинетик), установкой пакетов в официальные образы OpenWrt 24.10 и 25.12 и в Entware. На настоящих роутерах она не проверялась. Ставьте её только туда, где сможете вернуть сеть: команда `/etc/init.d/hyrouter stop` (на Кинетике — `/opt/etc/init.d/S99hyrouter stop`) по SSH снимает все правила HyRouter; с блокировкой при загрузке — ещё `/etc/init.d/hyrouter-guard disable` (на Кинетике — `/opt/sbin/hyrouterd -cleanup`).
 
 ## Возможности
 
@@ -73,9 +73,9 @@ HyRouter — версия [HyRoute](https://github.com/lardan099/HyRoute) для
 
    ```sh
    # OpenWrt 24.10
-   opkg update && opkg install /tmp/hyrouter_0.4.0-1_aarch64_cortex-a53.ipk
+   opkg update && opkg install /tmp/hyrouter_0.5.0-1_aarch64_cortex-a53.ipk
    # OpenWrt 25.x
-   apk update && apk add --allow-untrusted /tmp/hyrouter-0.4.0-r1_aarch64_cortex-a53.apk
+   apk update && apk add --allow-untrusted /tmp/hyrouter-0.5.0-r1_aarch64_cortex-a53.apk
    ```
 
 4. Откройте `http://192.168.1.1:8088` (адрес вашего роутера) и войдите паролем root. Добавьте сервер по ссылке или подписку, назовите устройства, задайте правила и нажмите «Включить».
