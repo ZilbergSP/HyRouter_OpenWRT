@@ -51,8 +51,7 @@ func TestNFT(t *testing.T) {
 	}
 	if !strings.Contains(fixed, "tcp sport { 80, 443 } ct reply packets 1 queue num 200 bypass") ||
 		!strings.Contains(fixed, "tcp dport 30000-31949 return") || strings.Contains(fixed, "zapret_probe") {
-		t.Errorf("fixed:
-%s", fixed)
+		t.Errorf("fixed:\n%s", fixed)
 	}
 
 	// Bypass off, no pick: no queue at all; the probe range still skips.
