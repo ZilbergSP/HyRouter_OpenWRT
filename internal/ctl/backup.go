@@ -210,7 +210,7 @@ func (c *Controller) PlanRestore(b []byte) (RestorePlan, error) {
 			warnings = append(warnings, fmt.Sprintf("интерфейса %s на этом роутере нет: проверьте «Интерфейсы LAN» после восстановления", n))
 		}
 	}
-	cp, err := compile(st, nil)
+	cp, err := compile(st, nil, "")
 	if err != nil {
 		return RestorePlan{}, fmt.Errorf("правила копии не применяются: %v", err)
 	}

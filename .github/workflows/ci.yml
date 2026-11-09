@@ -144,6 +144,9 @@ jobs:
             hyrouterd -version
             sh -n /etc/init.d/hyrouter
             sh -n /etc/init.d/hyrouter-guard
+            test -x /usr/share/hyrouter/zapret/nfqws2
+            test -f /usr/share/hyrouter/zapret/lua/zapret-lib.lua
+            test -f /usr/share/hyrouter/zapret/blobs/tls_clienthello_vk_com.bin
             # The kill switch at boot closes the LAN interfaces of the settings.
             echo "{\"enabled\":true,\"killSwitch\":true,\"lan\":[\"br-lan\",\"br-guest\"]}" >/etc/hyrouter/settings.json
             /etc/init.d/hyrouter-guard boot

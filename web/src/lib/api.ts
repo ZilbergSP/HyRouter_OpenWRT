@@ -17,6 +17,7 @@ import type {
   StateView,
   StatsReport,
   Status,
+  ZapretView,
 } from './types';
 
 export interface SubInput {
@@ -102,6 +103,17 @@ export const api = {
   restorePlan: (backup: unknown) => call<RestorePlan>('POST', '/api/restore/plan', backup),
   restore: (token: string) => call<EditResp>('POST', '/api/restore', { token }),
   undoRestore: () => call<EditResp>('POST', '/api/restore/undo', {}),
+  zapret: () => call<ZapretView>('GET', '/api/zapret'),
+  saveZapret: (z: {
+    enabled: boolean;
+    targets: string[];
+    sites: string[];
+    methods: Record<string, string>;
+    via: Record<string, string>;
+    autoHeal: boolean;
+  }) => call<EditResp & { zapret: ZapretView }>('PUT', '/api/zapret', z),
+  zapretPick: () => call<ZapretView>('POST', '/api/zapret/pick', {}),
+  zapretPickCancel: () => call<ZapretView>('POST', '/api/zapret/pick/cancel', {}),
   geo: () => call<GeoStatus>('GET', '/api/geo'),
   saveGeo: (g: { source: string; auto: boolean }) => call<EditResp & { geo: GeoStatus }>('PUT', '/api/geo', g),
   updateGeo: () => call<GeoStatus>('POST', '/api/geo/update', {}),

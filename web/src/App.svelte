@@ -11,6 +11,7 @@
   import Log from './pages/Log.svelte';
   import Connections from './pages/Connections.svelte';
   import Stats from './pages/Stats.svelte';
+  import Zapret from './pages/Zapret.svelte';
   import Settings from './pages/Settings.svelte';
 
   const pages = [
@@ -19,6 +20,7 @@
     { path: '/groups', title: 'Группы' },
     { path: '/rules', title: 'Правила' },
     { path: '/devices', title: 'Устройства' },
+    { path: '/zapret', title: 'Обход DPI' },
     { path: '/connections', title: 'Соединения' },
     { path: '/stats', title: 'Статистика' },
     { path: '/log', title: 'Журнал' },
@@ -135,6 +137,8 @@
           <Rules {view} onstate={(v) => (view = v)} />
         {:else if route === '/devices'}
           <Devices {view} onstate={(v) => (view = v)} />
+        {:else if route === '/zapret'}
+          <Zapret {view} onstate={(v) => (view = v)} />
         {:else if route === '/connections'}
           <Connections {view} />
         {:else if route === '/stats'}

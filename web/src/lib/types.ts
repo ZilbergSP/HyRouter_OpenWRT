@@ -210,6 +210,41 @@ export interface RestorePlan {
   warnings: string[];
 }
 
+export interface ZapretView {
+  available: boolean;
+  routing: boolean;
+  settings: {
+    enabled: boolean;
+    targets: string[] | null;
+    sites?: string[] | null;
+    methods?: Record<string, string> | null;
+    via?: Record<string, string> | null;
+    autoHeal?: boolean;
+  };
+  status: { state: string; error?: string; restarts: number; lines: string[] };
+  error?: string;
+  network: string;
+  wan: string[];
+  offload: boolean;
+  targets: { target: string; name: string; on: boolean; fixed?: string; picked?: string; using: string; via?: string }[];
+  methods: { id: string; name: string }[];
+  pick?: {
+    running: boolean;
+    step: string;
+    done: number;
+    total: number;
+    results: Record<string, string> | null;
+    tried: number;
+    diagnosis?: Record<string, { kind: string; text: string; detail: string; bypass: boolean }> | null;
+    error?: string;
+    skipped?: string[];
+    auto?: boolean;
+    why?: string;
+  };
+  commandLine?: string;
+  healNote?: string;
+}
+
 export interface MergeStats {
   added: number;
   updated: number;

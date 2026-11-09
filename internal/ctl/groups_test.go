@@ -57,7 +57,7 @@ func TestCompileGroups(t *testing.T) {
 		{Name: "x", Ports: rules.PortList{"25"}, Action: rules.Tunnel, Profile: "srv-x", Fallback: []string{empty.ID}},
 		{Name: "gone", Ports: rules.PortList{"26"}, Action: rules.Tunnel, Profile: "grp-00000000000f"},
 	}}
-	cp, err := compile(st, nil)
+	cp, err := compile(st, nil, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -79,7 +79,7 @@ func TestCompileGroups(t *testing.T) {
 		t.Errorf("issues:\n%s", issues)
 	}
 	// The members the controller chose run instead of the first ones.
-	cp, err = compile(st, func(g groups.Group) []string { return g.Members[len(g.Members)-1:] })
+	cp, err = compile(st, func(g groups.Group) []string { return g.Members[len(g.Members)-1:] }, "")
 	if err != nil {
 		t.Fatal(err)
 	}

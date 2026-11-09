@@ -110,6 +110,8 @@ type Controller struct {
 	// rmu guards restore, the planned restores.
 	rmu     sync.Mutex
 	restore restoreState
+	// zap is the DPI bypass.
+	zap zapretCtl
 }
 
 // New makes a controller that is not routing yet.
@@ -237,6 +239,7 @@ func (c *Controller) Run(ctx context.Context) {
 	go c.runSubs(ctx)
 	go c.runGeo(ctx)
 	go c.runStats(ctx)
+	go c.runZapretHeal(ctx)
 	c.kickGeo()
 	<-ctx.Done()
 }
@@ -276,8 +279,9 @@ type compiled struct {
 // compile turns a state into the rule set, the nftables script, the DNS
 // policy and the servers to run. Issues are what matches nothing for now
 // (a missing server or group, a device not in the table, VLESS in Lite).
-// run gives the members of a group that run (nil = its first ones).
-func compile(st store.State, run func(groups.Group) []string) (*compiled, error) {
+// run gives the members of a group that run (nil = its first ones);
+// extra is the DPI bypass's part of the table.
+func compile(st store.State, run func(groups.Group) []string, extra string) (*compiled, error) {
 	table := rules.DeviceTable{}
 	for _, d := range st.Devices {
 		var a rules.DeviceAddrs
@@ -369,7 +373,7 @@ func compile(st store.State, run func(groups.Group) []string) (*compiled, error)
 		return nil, fmt.Errorf("DNS: %w", err)
 	}
 	s := st.Settings
-	out.script, err = nft.Compile(plan, def, nft.Options{LAN: s.LAN, TunnelPort: s.TunnelPort, NamePort: s.NamePort, DNSPort: s.DNSPort})
+	out.script, err = nft.Compile(plan, def, nft.Options{LAN: s.LAN, TunnelPort: s.TunnelPort, NamePort: s.NamePort, DNSPort: s.DNSPort, Extra: extra})
 	if err != nil {
 		return nil, err
 	}
@@ -404,11 +408,30 @@ func (c *Controller) resync() {
 	if !c.running {
 		return
 	}
-	cp, err := compile(c.st, c.runMembers)
+	cp, err := compile(c.st, c.runMembers, c.zapretExtra())
 	if err != nil {
 		return
 	}
 	c.install(cp)
+}
+
+// reloadTable loads the table again (the DPI bypass's part changed).
+func (c *Controller) reloadTable(ctx context.Context) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if !c.running {
+		return nil
+	}
+	cp, err := compile(c.st, c.runMembers, c.zapretExtra())
+	if err != nil {
+		return err
+	}
+	c.install(cp)
+	if err := nft.Load(ctx, cp.script); err != nil {
+		return err
+	}
+	c.dns.Refill()
+	return nil
 }
 
 // Running reports whether HyRouter routes the LAN.
@@ -432,11 +455,12 @@ func (c *Controller) Start(ctx context.Context) error {
 		return err
 	}
 	c.running, c.lastErr, c.since = true, "", time.Now()
+	go c.zapretApply()
 	return nil
 }
 
 func (c *Controller) startLocked(ctx context.Context) error {
-	cp, err := compile(c.st, c.runMembers)
+	cp, err := compile(c.st, c.runMembers, c.zapretExtra())
 	if err != nil {
 		return err
 	}
@@ -527,6 +551,7 @@ func (c *Controller) stopLocked() error {
 	defer cancel()
 	var errs []error
 	c.stopProber()
+	c.zapretStop()
 	if c.ctStop != nil {
 		c.ctStop()
 		c.ctStop = nil
@@ -576,7 +601,7 @@ func (c *Controller) Apply(ctx context.Context, st store.State) error {
 		}
 		return nil
 	}
-	cp, err := compile(st, c.runMembers)
+	cp, err := compile(st, c.runMembers, c.zapretExtra())
 	if err != nil {
 		return err
 	}
@@ -600,7 +625,7 @@ func (c *Controller) Apply(ctx context.Context, st store.State) error {
 // Check compiles a state without applying it: the web interface saves
 // nothing the controller would refuse.
 func Check(st store.State) error {
-	_, err := compile(st, nil)
+	_, err := compile(st, nil, "")
 	return err
 }
 

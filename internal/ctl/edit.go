@@ -56,6 +56,7 @@ func (c *Controller) editLocked(ctx context.Context, change func(*store.State) e
 	}
 	c.syncGuard(st.Settings)
 	c.kickGeo()
+	go c.zapretApply()
 	return nil
 }
 

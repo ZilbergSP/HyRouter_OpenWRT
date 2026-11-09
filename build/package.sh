@@ -15,7 +15,7 @@ mkdir -p "$2"
 OUT=$(cd "$2" && pwd)
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 URL=https://github.com/ZilbergSP/HyRouter_OpenWRT
-DEPENDS="kmod-nft-tproxy kmod-nft-socket ca-bundle"
+DEPENDS="kmod-nft-tproxy kmod-nft-socket kmod-nft-queue ca-bundle"
 
 # package GOARCH extra-environment opkg-architectures...
 TARGETS=(
@@ -25,8 +25,27 @@ TARGETS=(
 	"hyrouter-lite arm GOARM=7 arm_cortex-a7_neon-vfpv4 arm_cortex-a7 arm_cortex-a9 arm_cortex-a15_neon-vfpv4"
 )
 
-rm -rf "${OUT:?}/bin" "${OUT:?}/tree" "${OUT:?}/packages"
+rm -rf "${OUT:?}/bin" "${OUT:?}/tree" "${OUT:?}/packages" "${OUT:?}/zapret2"
 mkdir -p "$OUT/bin" "$OUT/tree" "$OUT/packages"
+
+# zapret2 (build/deps.json): nfqws2, its Lua libraries and fake payloads
+# for the DPI bypass, from the release checked by its SHA-256.
+deps="$ROOT/build/deps.json"
+zver=$(jq -r .zapret2.version "$deps")
+curl -fsSL --retry 4 --retry-all-errors "$(jq -r .zapret2.url "$deps")" -o "$OUT/zapret2.zip"
+echo "$(jq -r .zapret2.sha256 "$deps")  $OUT/zapret2.zip" | sha256sum -c -
+unzip -q "$OUT/zapret2.zip" -d "$OUT/zapret2"
+ZDIR="$OUT/zapret2/zapret2-$zver"
+
+# zarch is zapret2's binary folder of a GOARCH.
+zarch() {
+	case $1 in
+	arm64) echo linux-arm64 ;;
+	amd64) echo linux-x86_64 ;;
+	mipsle) echo linux-mipsel ;;
+	arm) echo linux-arm ;;
+	esac
+}
 
 tarit() { tar --owner=0 --group=0 --numeric-owner --format=gnu "$@"; }
 
@@ -53,6 +72,15 @@ for t in "${TARGETS[@]}"; do
 		install -m 0755 "$bin" "$tree/root/usr/bin/hyrouterd"
 		install -m 0755 "$ROOT/build/openwrt/hyrouter.init" "$tree/root/etc/init.d/hyrouter"
 		install -m 0755 "$ROOT/build/openwrt/hyrouter-guard.init" "$tree/root/etc/init.d/hyrouter-guard"
+		z="$tree/root/usr/share/hyrouter/zapret"
+		mkdir -p "$z/lua" "$z/blobs"
+		install -m 0755 "$ZDIR/binaries/$(zarch "$goarch")/nfqws2" "$z/nfqws2"
+		for f in zapret-lib.lua zapret-antidpi.lua zapret-auto.lua; do
+			install -m 0644 "$ZDIR/lua/$f" "$z/lua/$f"
+		done
+		for f in tls_clienthello_www_google_com.bin quic_initial_www_google_com.bin tls_clienthello_vk_com.bin; do
+			install -m 0644 "$ZDIR/files/fake/$f" "$z/blobs/$f"
+		done
 		echo /etc/hyrouter/ >"$tree/root/lib/upgrade/keep.d/hyrouter"
 		install -m 0755 "$ROOT/build/openwrt/postinst" "$ROOT/build/openwrt/prerm" "$tree/control/"
 		size=$(du -sb "$tree/root" | cut -f1)

@@ -35,8 +35,8 @@ func TestBackupRestoreUndo(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := srcStore.SaveRules(rules.Config{DefaultAction: rules.Tunnel, Rules: []rules.Rule{
-		{Name: "всё напрямую", Action: rules.Direct},
-		{Name: "выключено", Action: rules.Direct, Enabled: &no},
+		{Name: "всё напрямую", Ports: rules.PortList{"1-65535"}, Action: rules.Direct},
+		{Name: "выключено", Ports: rules.PortList{"443"}, Action: rules.Direct, Enabled: &no},
 	}}); err != nil {
 		t.Fatal(err)
 	}

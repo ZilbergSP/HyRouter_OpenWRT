@@ -1,6 +1,7 @@
 package zapret
 
 import (
+	"net/netip"
 	"os"
 	"path/filepath"
 	"strings"
@@ -93,7 +94,7 @@ func TestNFTFiles(t *testing.T) {
 		all[tg] = p
 	}
 	cases := map[string]NFTConfig{
-		"full":  {WAN: []string{"eth1", "pppoe-wan"}, Queue: QueueFor(all), Probes: true},
+		"full":  {WAN: []string{"eth1", "pppoe-wan"}, Queue: QueueFor(all), Probes: true, Skip: []netip.Addr{netip.MustParseAddr("203.0.113.7"), netip.MustParseAddr("2001:db8::7")}},
 		"fixed": {WAN: []string{"eth1"}, Queue: QueueFor(map[Target]Plan{YouTube: {Methods: []string{"fake"}}})},
 		"off":   {WAN: []string{"eth1"}},
 		"pick":  {WAN: []string{"eth1"}, Probes: true},

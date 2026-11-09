@@ -3,6 +3,8 @@ package zapret
 import (
 	"errors"
 	"fmt"
+	"net/netip"
+	"slices"
 	"strings"
 )
 
@@ -55,6 +57,22 @@ type NFTConfig struct {
 	// Probes: the rules of an auto-pick's probe slots (the router's own
 	// connections from ProbeSlot ports go to their testers' queues).
 	Probes bool
+	// Skip: HyRouter's server addresses, never queued (the sets
+	// SetSkip4/6 start with them).
+	Skip []netip.Addr
+}
+
+// skipElems is the elements of a skip set.
+func skipElems(addrs []netip.Addr, v6 bool) string {
+	var out []string
+	for _, a := range addrs {
+		a = a.Unmap()
+		if a.IsValid() && a.Is6() == v6 {
+			out = append(out, a.String())
+		}
+	}
+	slices.Sort(out)
+	return strings.Join(slices.Compact(out), ", ")
 }
 
 // NFT returns the sets and chains of the bypass, to be placed inside
@@ -86,10 +104,16 @@ func NFT(c NFTConfig) (string, error) {
 	w("\tset %s {", SetSkip4)
 	w("\t\ttype ipv4_addr")
 	w("\t\tflags interval")
+	if e := skipElems(c.Skip, false); e != "" {
+		w("\t\telements = { %s }", e)
+	}
 	w("\t}")
 	w("\tset %s {", SetSkip6)
 	w("\t\ttype ipv6_addr")
 	w("\t\tflags interval")
+	if e := skipElems(c.Skip, true); e != "" {
+		w("\t\telements = { %s }", e)
+	}
 	w("\t}")
 
 	// Out: after NAT (srcnat is priority 100).

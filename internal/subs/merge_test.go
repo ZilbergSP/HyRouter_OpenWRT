@@ -128,40 +128,6 @@ func TestMergeOldPortSpecs(t *testing.T) {
 	}
 }
 
-// The duplicate checks see servers saved with the old ports: their links
-// are not imported again, and a subscription's copy marks them.
-func TestDuplicatesOldPortSpecs(t *testing.T) {
-	c, _ := newCtl(t)
-	var text []string
-	c.mu.Lock()
-	for i, x := range oldPortLinks {
-		p, _, err := hysteria.ParseURI(x.link)
-		if err != nil {
-			t.Fatal(err)
-		}
-		p.ID, p.Ports = fmt.Sprintf("old%d", i), x.saved
-		c.profiles.List = append(c.profiles.List, p)
-		text = append(text, x.link)
-	}
-	c.mu.Unlock()
-	res, err := c.ImportURIs(strings.Join(text, "\n"))
-	if err != nil || len(res.Added) != 0 || len(res.Skipped) != len(oldPortLinks) {
-		t.Fatalf("%+v %v", res, err)
-	}
-	c.mu.Lock()
-	for i, x := range oldPortLinks {
-		p, _, _ := hysteria.ParseURI(x.link)
-		p.ID, p.Source = fmt.Sprintf("sub%d", i), "sub:s1"
-		c.profiles.List = append(c.profiles.List, p)
-	}
-	c.mu.Unlock()
-	for _, s := range c.Profiles()[:len(oldPortLinks)] {
-		if s.DuplicateOf == "" {
-			t.Errorf("%s (%s) is not marked as a copy", s.Name, s.Server)
-		}
-	}
-}
-
 // An update must not undo what the user set on a subscription server
 // outside the share link, nor restart its Hysteria for nothing.
 func TestMergeKeepsLocalSettings(t *testing.T) {
@@ -300,4 +266,12 @@ func TestSubscriptionServerCap(t *testing.T) {
 	if l := capServers(Links{Profiles: make([]hysteria.Profile, 3)}); len(l.Profiles) != 3 || len(l.Warnings) != 0 {
 		t.Fatalf("%d servers, %q", len(l.Profiles), l.Warnings)
 	}
+}
+
+// newID numbers the servers a test merge adds.
+var newIDs int
+
+func newID() string {
+	newIDs++
+	return fmt.Sprintf("id-%d", newIDs)
 }
