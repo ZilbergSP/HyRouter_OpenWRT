@@ -12,11 +12,33 @@ IP, портам и спискам geosite/geoip. Устройства в сет
 
 | Вопрос | Решение |
 |---|---|
-| Роутеры | OpenWrt 24.10 и новее с fw4 (nftables), **aarch64** и **x86_64**: 128+ МБ флеша, 256+ МБ RAM. MIPS и ARMv7 не поддерживаются |
+| Роутеры | OpenWrt 24.10 и новее с fw4 (nftables). Две редакции из одного кода ([«Редакции»](#редакции)): **HyRouter** — aarch64 и x86_64, 256+ МБ RAM; **HyRouter Lite** — MIPS MT7621 (`mipsel_24kc`) и ARMv7 IPQ40xx (`arm_cortex-a7_neon-vfpv4`), 256 МБ RAM (128 МБ — с оговорками). MT7628/MT7620 с 64 МБ не поддерживаются |
 | Правила | Как в HyRoute, но вместо программы — устройство (MAC, при необходимости IP). Сайты, IP и сети, geosite/geoip, протокол и порты, сервер или группа, запасные серверы, «Всё остальное» |
 | Управление | Свой веб-интерфейс на Svelte 5, встроенный в бинарник. LuCI не используется |
 | Код HyRoute | Нужные пакеты копируются из HyRoute (MIT) в этот репозиторий, у каждого — отметка коммита-источника ([«Код из HyRoute»](#код-из-hyroute)) |
-| Ядра | Официальные `hysteria` и `xray` для linux-arm64/amd64, версии и SHA-256 закреплены в `build/deps.json`, как в HyRoute |
+| Ядра | Официальные `hysteria` и `xray` для linux-arm64/amd64 (Lite: `hysteria` для linux-mipsle-sf и linux-arm), версии и SHA-256 закреплены в `build/deps.json`, как в HyRoute; в пакет не входят, скачиваются при первой необходимости |
+
+## Редакции
+
+Обе редакции собираются из одного кода; Lite — с тегом сборки `lite`
+(`internal/edition`), пакет `hyrouter-lite` (конфликтует с `hyrouter`).
+
+| | HyRouter | HyRouter Lite |
+|---|---|---|
+| Архитектуры | `aarch64_cortex-a53`, `aarch64_generic`, `x86_64` | `mipsel_24kc` (`GOARCH=mipsle GOMIPS=softfloat`), `arm_cortex-a7_neon-vfpv4` (`GOARCH=arm GOARM=7`) |
+| Протоколы | Hysteria 2, VLESS (Xray) | Hysteria 2 |
+| Ядра | `/usr/share/hyrouter/bin` | там же, если на флеше 32+ МБ свободно, иначе `/tmp/hyrouter/bin` (RAM, скачивается заново после перезагрузки) |
+| Кэш DNS | 50 000 записей | 10 000 записей |
+| Память hyrouterd | без ограничения | `GOMEMLIMIT` 48 МБ |
+| Одновременных соединений через relay | 8192 | 2048 |
+
+- На слабом процессоре узкое место — шифрование в ядре VPN (Hysteria, Xray).
+  Прямой трафик решает ядро Linux, и HyRouter его не замедляет: это главное,
+  что делает Lite возможной.
+- **Позже для Lite:** клиент Hysteria внутри hyrouterd (библиотека
+  `apernet/hysteria/core`, MIT) вместо отдельного процесса — один рантайм Go
+  и ~20 МБ вместо ~35 МБ на флеше; редакция «только обход DPI» без VPN для
+  роутеров со 128 МБ и 16 МБ флеша.
 
 ## Как идёт трафик
 
@@ -217,12 +239,15 @@ HyRoute лежат в `internal/` и не импортируются, поэто
 
 ## Сборка и пакеты
 
-- `CGO_ENABLED=0 GOOS=linux GOARCH=arm64|amd64` — статический бинарник.
+- `CGO_ENABLED=0 GOOS=linux`, статический бинарник: HyRouter —
+  `GOARCH=arm64|amd64`, Lite — `-tags lite` с `GOARCH=mipsle GOMIPS=softfloat`
+  и `GOARCH=arm GOARM=7`.
 - Пакеты для OpenWrt: `.ipk` (opkg, 24.10) и `.apk` (apk-tools, выпуски
   после 24.10). Зависимости: `kmod-nft-tproxy`, `kmod-nft-socket`, `kmod-nft-queue` (обход DPI),
-  `ca-bundle`. Архитектуры пакетов — `aarch64_cortex-a53`, `aarch64_generic`,
-  `x86_64` (и другие aarch64-цели по мере проверки).
-- Релиз собирает CI по тегу: пакеты, `SHA256SUMS`, заметки к выпуску.
+  `ca-bundle`. Архитектуры пакетов — в [«Редакции»](#редакции).
+- Релиз собирает CI по тегу: пакеты обеих редакций, `SHA256SUMS`, заметки
+  к выпуску (`docs/release-notes/vX.Y.Z.md`). Выпуски до 1.0 — бета
+  (pre-release на GitHub).
 
 ## Тесты
 
@@ -248,3 +273,8 @@ HyRoute лежат в `internal/` и не импортируются, поэто
 4. **Веб-интерфейс** и вход через rpcd.
 5. **Пакеты** `.ipk`/`.apk`, служба procd, sysupgrade, обновления ядер, смоук-тест в QEMU.
 6. Соединения, статистика, резервная копия, kill switch при загрузке.
+
+**Бета v0.1.0** (обе редакции) — этапы 2, 4 и 5 и UDP из этапа 3:
+правила по устройствам, сайтам, IP, портам и протоколу; серверы по ссылкам;
+DNS с наборами адресов; TCP и UDP через TPROXY; веб-интерфейс; пакеты. Группы,
+подписки, geosite/geoip, обход DPI и этап 6 — в следующих выпусках.
