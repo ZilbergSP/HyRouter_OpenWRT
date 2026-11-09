@@ -16,11 +16,11 @@ var version = "dev"
 
 func main() {
 	showVersion := flag.Bool("version", false, "print the version and exit")
+	dir := flag.String("config", "/etc/hyrouter", "the settings folder")
 	flag.Parse()
 	if *showVersion {
 		fmt.Printf("hyrouterd %s (%s)\n", version, edition.Name)
 		return
 	}
-	fmt.Fprintln(os.Stderr, "hyrouterd: маршрутизация ещё не готова")
-	os.Exit(2)
+	os.Exit(run(*dir))
 }

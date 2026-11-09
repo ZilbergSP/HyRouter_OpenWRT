@@ -1,0 +1,74 @@
+// The client of hyrouterd's API. The session is a cookie; every change
+// carries the session's CSRF token.
+
+import type { Device, EditResp, LogEntry, Neighbour, RulesConfig, Session, StateView, Status } from './types';
+
+let csrf = '';
+
+export class ApiError extends Error {
+  status: number;
+  constructor(status: number, message: string) {
+    super(message);
+    this.status = status;
+  }
+}
+
+async function call<T>(method: string, path: string, body?: unknown): Promise<T> {
+  const headers: Record<string, string> = {};
+  if (body !== undefined) headers['Content-Type'] = 'application/json';
+  if (method !== 'GET') headers['X-CSRF-Token'] = csrf;
+  let r: Response;
+  try {
+    r = await fetch(path, {
+      method,
+      headers,
+      body: body === undefined ? undefined : JSON.stringify(body),
+      credentials: 'same-origin',
+    });
+  } catch {
+    throw new ApiError(0, 'Роутер не отвечает');
+  }
+  let data: unknown = null;
+  try {
+    data = await r.json();
+  } catch {
+    data = null;
+  }
+  if (!r.ok) {
+    const msg = (data as { error?: string } | null)?.error ?? `Ошибка ${r.status}`;
+    throw new ApiError(r.status, msg);
+  }
+  return data as T;
+}
+
+export const api = {
+  async session(): Promise<Session> {
+    const s = await call<Session>('GET', '/api/session');
+    csrf = s.csrf ?? '';
+    return s;
+  },
+  async login(password: string): Promise<void> {
+    const r = await call<{ csrf: string }>('POST', '/api/login', { password });
+    csrf = r.csrf;
+  },
+  logout: () => call<unknown>('POST', '/api/logout', {}),
+  status: () => call<{ version: string; status: Status }>('GET', '/api/status'),
+  state: () => call<StateView>('GET', '/api/state'),
+  routing: (enabled: boolean) => call<{ status: Status }>('POST', '/api/routing', { enabled }),
+  addServer: (link: string, name: string) =>
+    call<EditResp & { warnings: string[]; id: string }>('POST', '/api/servers', { link, name }),
+  renameServer: (id: string, name: string) =>
+    call<EditResp>('PATCH', `/api/servers/${encodeURIComponent(id)}`, { name }),
+  deleteServer: (id: string) => call<EditResp>('DELETE', `/api/servers/${encodeURIComponent(id)}`),
+  setMain: (id: string) => call<EditResp>('PUT', '/api/main', { id }),
+  saveRules: (cfg: RulesConfig) => call<EditResp>('PUT', '/api/rules', cfg),
+  saveDevices: (devices: Device[]) => call<EditResp>('PUT', '/api/devices', devices),
+  neighbours: () => call<Neighbour[]>('GET', '/api/neighbours'),
+  saveSettings: (s: { lan: string[]; dnsByRules: boolean; dnsTunnel: string }) =>
+    call<EditResp>('PUT', '/api/settings', s),
+  log: (after: number) => call<LogEntry[]>('GET', `/api/log?after=${after}`),
+};
+
+export function errorText(e: unknown): string {
+  return e instanceof Error ? e.message : String(e);
+}
