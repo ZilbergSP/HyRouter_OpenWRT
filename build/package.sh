@@ -32,7 +32,7 @@ mkdir -p "$OUT/bin" "$OUT/tree" "$OUT/packages"
 # for the DPI bypass, from the release checked by its SHA-256.
 deps="$ROOT/build/deps.json"
 zver=$(jq -r .zapret2.version "$deps")
-curl -fsSL --retry 4 --retry-all-errors "$(jq -r .zapret2.url "$deps")" -o "$OUT/zapret2.zip"
+curl -fsSL --retry 10 --retry-delay 15 --retry-all-errors "$(jq -r .zapret2.url "$deps")" -o "$OUT/zapret2.zip"
 echo "$(jq -r .zapret2.sha256 "$deps")  $OUT/zapret2.zip" | sha256sum -c -
 unzip -q "$OUT/zapret2.zip" -d "$OUT/zapret2"
 ZDIR="$OUT/zapret2/zapret2-$zver"

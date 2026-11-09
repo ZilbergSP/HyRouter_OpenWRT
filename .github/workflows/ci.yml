@@ -79,7 +79,7 @@ jobs:
         run: |
           z="$RUNNER_TEMP/zapret2"
           mkdir -p "$z"
-          curl -fsSL --retry 4 --retry-all-errors "$(jq -r .zapret2.url build/deps.json)" -o "$z/release.zip"
+          curl -fsSL --retry 10 --retry-delay 15 --retry-all-errors "$(jq -r .zapret2.url build/deps.json)" -o "$z/release.zip"
           echo "$(jq -r .zapret2.sha256 build/deps.json)  $z/release.zip" | sha256sum -c
           unzip -q "$z/release.zip" -d "$z"
           jq -r --arg z "$z" '.zapret2.files | to_entries[] | "\(.value)  \($z)/\(.key)"' build/deps.json | sha256sum -c
@@ -125,7 +125,7 @@ jobs:
       - name: hyrouterd and the pinned Hysteria
         run: |
           CGO_ENABLED=0 go build -o "$RUNNER_TEMP/hyrouterd" ./cmd/hyrouterd
-          curl -fsSL --retry 4 --retry-all-errors "$(jq -r .hysteria.assets.amd64.url build/deps.json)" -o "$RUNNER_TEMP/hysteria"
+          curl -fsSL --retry 10 --retry-delay 15 --retry-all-errors "$(jq -r .hysteria.assets.amd64.url build/deps.json)" -o "$RUNNER_TEMP/hysteria"
           echo "$(jq -r .hysteria.assets.amd64.sha256 build/deps.json)  $RUNNER_TEMP/hysteria" | sha256sum -c
           chmod +x "$RUNNER_TEMP/hysteria"
           sudo apt-get install -y -qq nftables dnsmasq-base >/dev/null

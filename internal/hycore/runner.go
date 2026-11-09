@@ -34,6 +34,9 @@ type Runner struct {
 	Log     *slog.Logger
 	// Resolve finds the server's addresses (nil: the system's resolver).
 	Resolve func(ctx context.Context, host string) ([]netip.Addr, error)
+	// Tune adjusts the client config before each connection (nil: as the
+	// profile says).
+	Tune func(*client.Config)
 
 	mu        sync.Mutex
 	st        hysteria.Status
@@ -206,6 +209,9 @@ func (r *Runner) connect(ctx context.Context) (client.Client, *client.HandshakeI
 	cfg, err := Config(p, ips[0].String())
 	if err != nil {
 		return nil, nil, err
+	}
+	if r.Tune != nil {
+		r.Tune(cfg)
 	}
 	type result struct {
 		cl   client.Client

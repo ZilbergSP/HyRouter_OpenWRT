@@ -82,6 +82,15 @@ func zapretBroad() int {
 	return 60
 }
 
+// zapretBatch is the testers at once: an nfqws2 each, too many for the
+// memory of a Lite router.
+func zapretBatch() int {
+	if edition.Lite {
+		return 4
+	}
+	return zapret.ProbeSlots - 1
+}
+
 // zapretCtl is the controller's part.
 type zapretCtl struct {
 	mu  sync.Mutex // apply and pick, one at a time
@@ -799,7 +808,7 @@ func (c *Controller) zapretPickRun(why string) {
 		out := map[zapret.Target][]timed{}
 		retried := false
 		for len(cands) > 0 && ctx.Err() == nil {
-			batch := cands[:min(len(cands), zapret.ProbeSlots-1)]
+			batch := cands[:min(len(cands), zapretBatch())]
 			testers := make([]*zapret.Runner, len(batch))
 			for i, id := range batch {
 				tried[id] = true
@@ -950,7 +959,7 @@ func (c *Controller) zapretPickRun(why string) {
 		}
 		cands = cands[:min(len(cands), budget)]
 		for len(cands) > 0 && ctx.Err() == nil && time.Now().Before(deadline) {
-			batch := cands[:min(len(cands), zapret.ProbeSlots-1)]
+			batch := cands[:min(len(cands), zapretBatch())]
 			cands = cands[len(batch):]
 			update(func(p *ZapretPickView) {
 				p.Step = fmt.Sprintf("Генерирую свои варианты: проверено %d, рабочих найдено %d", len(tried), workingCount())
