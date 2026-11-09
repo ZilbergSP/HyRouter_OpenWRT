@@ -54,8 +54,8 @@ func TestCompileGroups(t *testing.T) {
 	st.Groups.Groups = []groups.Group{big, empty}
 	st.Settings.Main = big.ID
 	st.Rules = rules.Config{DefaultAction: rules.Tunnel, Rules: []rules.Rule{
-		{Name: "x", Ports: "25", Action: rules.Tunnel, Profile: "srv-x", Fallback: []string{empty.ID}},
-		{Name: "gone", Ports: "26", Action: rules.Tunnel, Profile: "grp-00000000000f"},
+		{Name: "x", Ports: rules.PortList{"25"}, Action: rules.Tunnel, Profile: "srv-x", Fallback: []string{empty.ID}},
+		{Name: "gone", Ports: rules.PortList{"26"}, Action: rules.Tunnel, Profile: "grp-00000000000f"},
 	}}
 	cp, err := compile(st, nil)
 	if err != nil {

@@ -28,6 +28,52 @@ export interface Server {
   protocol?: string;
   host: string;
   ports: string;
+  source?: string;
+  missing?: boolean;
+}
+
+export type Strategy = 'failover' | 'latency' | 'roundrobin' | 'random' | 'sticky';
+
+export interface Group {
+  id: string;
+  name: string;
+  strategy: Strategy;
+  members: string[];
+  subs?: string[];
+  revert?: boolean;
+  toleranceMs?: number;
+  switchAfterErrors?: number;
+}
+
+export interface GroupProbe {
+  url?: string;
+  intervalSec?: number;
+}
+
+export interface GroupsFile {
+  version: number;
+  probe?: GroupProbe;
+  groups: Group[];
+}
+
+export interface MemberStatus {
+  id: string;
+  latencyMs: number;
+  error?: string;
+  errors: number;
+  skipped: boolean;
+  reason?: string;
+}
+
+export interface GroupStatus {
+  id: string;
+  active: string;
+  up: number;
+  running: string[];
+  probeBroken: boolean;
+  rejected: number;
+  used: boolean;
+  members: MemberStatus[];
 }
 
 export interface Device {
@@ -52,10 +98,13 @@ export interface StateView {
   edition: string;
   lite: boolean;
   vless: boolean;
+  groupRun: number;
   settings: Settings;
   servers: Server[];
   rules: RulesConfig;
   devices: Device[];
+  groups: GroupsFile;
+  strategies: { id: Strategy; name: string }[];
   dnsPresets: { id: string; name: string }[];
 }
 
@@ -77,6 +126,7 @@ export interface Status {
   error?: string;
   issues: string[];
   servers: ServerStatus[];
+  groups: GroupStatus[];
   relay: number;
 }
 

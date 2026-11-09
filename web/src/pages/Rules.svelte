@@ -2,6 +2,9 @@
   import { api, errorText } from '../lib/api';
   import type { Action, Rule, RulesConfig, StateView } from '../lib/types';
   import RuleEditor from './RuleEditor.svelte';
+  import TargetSelect from '../lib/TargetSelect.svelte';
+  import FallbackList from '../lib/FallbackList.svelte';
+  import { mainName, targetName } from '../lib/targets';
 
   let { view, onstate }: { view: StateView; onstate: (v: StateView) => void } = $props();
 
@@ -20,12 +23,9 @@
 
   const actionText: Record<Action, string> = { tunnel: 'Через VPN', direct: 'Напрямую', block: 'Блок' };
 
-  function serverName(id?: string): string {
-    if (!id) {
-      const m = view.servers.find((s) => s.id === view.settings.main);
-      return m ? m.name : 'основной сервер не выбран';
-    }
-    return view.servers.find((s) => s.id === id)?.name ?? 'удалённый сервер';
+  function serverName(r: Rule): string {
+    const main = r.profile ? targetName(view, r.profile) : view.settings.main ? mainName(view) : 'основной сервер не выбран';
+    return r.fallback?.length ? `${main} + запасных: ${r.fallback.length}` : main;
   }
 
   function deviceText(items?: string[]): string {
@@ -126,7 +126,7 @@
 {#if saved}<div class="notice ok">Правила применены. Уже открытые соединения сохраняют прежний маршрут.</div>{/if}
 
 {#if editing === -1}
-  <RuleEditor rule={blank} devices={view.devices} servers={view.servers} onsave={edited} oncancel={() => (editing = null)} />
+  <RuleEditor rule={blank} {view} onsave={edited} oncancel={() => (editing = null)} />
 {/if}
 
 <div class="card">
@@ -142,13 +142,13 @@
       {#each cfg.rules as r, i (i)}
         <li class:off={r.enabled === false}>
           {#if editing === i}
-            <RuleEditor rule={r} devices={view.devices} servers={view.servers} onsave={edited} oncancel={() => (editing = null)} />
+            <RuleEditor rule={r} {view} onsave={edited} oncancel={() => (editing = null)} />
           {:else}
             <div class="row">
               <span class="num">{i + 1}</span>
               <strong>{r.name || 'Без названия'}</strong>
               <span class="badge {r.action === 'direct' ? 'ok' : r.action === 'block' ? 'bad' : ''}">
-                {actionText[r.action]}{r.action === 'tunnel' ? ': ' + serverName(r.profile) : ''}
+                {actionText[r.action]}{r.action === 'tunnel' ? ': ' + serverName(r) : ''}
               </span>
               <span class="spacer"></span>
               <label class="check small"><input type="checkbox" checked={r.enabled !== false} onchange={(e) => toggle(i, e.currentTarget.checked)} /> вкл.</label>
@@ -176,14 +176,22 @@
       <option value="block">Блокировать</option>
     </select>
     {#if cfg.defaultAction === 'tunnel'}
-      <select class="auto" value={cfg.defaultProfile ?? ''} onchange={(e) => change(() => (cfg.defaultProfile = e.currentTarget.value || undefined))}>
-        <option value="">Основной сервер</option>
-        {#each view.servers as s (s.id)}
-          <option value={s.id}>{s.name}</option>
-        {/each}
-      </select>
+      <span class="auto-select">
+        <TargetSelect {view} value={cfg.defaultProfile ?? ''} onchange={(v) => change(() => (cfg.defaultProfile = v || undefined))} />
+      </span>
     {/if}
   </div>
+  {#if cfg.defaultAction === 'tunnel'}
+    <div class="fallbacks">
+      <span class="muted small">Запасные серверы и группы</span>
+      <FallbackList
+        {view}
+        list={cfg.defaultFallback ?? []}
+        primary={cfg.defaultProfile ?? ''}
+        onchange={(l) => change(() => (cfg.defaultFallback = l.length ? l : undefined))}
+      />
+    </div>
+  {/if}
   <p class="muted small hint">
     «Через VPN» без доступного сервера соединение отклоняется: такой трафик никогда не идёт напрямую.
   </p>
@@ -228,5 +236,11 @@
   }
   .hint {
     margin-top: 10px;
+  }
+  .auto-select :global(select) {
+    width: auto;
+  }
+  .fallbacks {
+    margin-top: 12px;
   }
 </style>

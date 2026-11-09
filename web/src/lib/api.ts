@@ -1,7 +1,7 @@
 // The client of hyrouterd's API. The session is a cookie; every change
 // carries the session's CSRF token.
 
-import type { Device, EditResp, LogEntry, Neighbour, RulesConfig, Session, StateView, Status } from './types';
+import type { Device, EditResp, Group, GroupProbe, LogEntry, Neighbour, RulesConfig, Session, StateView, Status } from './types';
 
 let csrf = '';
 
@@ -61,6 +61,10 @@ export const api = {
     call<EditResp>('PATCH', `/api/servers/${encodeURIComponent(id)}`, { name }),
   deleteServer: (id: string) => call<EditResp>('DELETE', `/api/servers/${encodeURIComponent(id)}`),
   setMain: (id: string) => call<EditResp>('PUT', '/api/main', { id }),
+  addGroup: (g: Omit<Group, 'id'>) => call<EditResp & { id: string }>('POST', '/api/groups', g),
+  editGroup: (g: Group) => call<EditResp>('PUT', `/api/groups/${encodeURIComponent(g.id)}`, g),
+  deleteGroup: (id: string) => call<EditResp>('DELETE', `/api/groups/${encodeURIComponent(id)}`),
+  setGroupProbe: (p: GroupProbe) => call<EditResp>('PUT', '/api/group-probe', p),
   saveRules: (cfg: RulesConfig) => call<EditResp>('PUT', '/api/rules', cfg),
   saveDevices: (devices: Device[]) => call<EditResp>('PUT', '/api/devices', devices),
   neighbours: () => call<Neighbour[]>('GET', '/api/neighbours'),

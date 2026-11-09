@@ -5,6 +5,7 @@
   import Login from './pages/Login.svelte';
   import Home from './pages/Home.svelte';
   import Servers from './pages/Servers.svelte';
+  import Groups from './pages/Groups.svelte';
   import Rules from './pages/Rules.svelte';
   import Devices from './pages/Devices.svelte';
   import Log from './pages/Log.svelte';
@@ -13,6 +14,7 @@
   const pages = [
     { path: '/', title: 'Главная' },
     { path: '/servers', title: 'Серверы' },
+    { path: '/groups', title: 'Группы' },
     { path: '/rules', title: 'Правила' },
     { path: '/devices', title: 'Устройства' },
     { path: '/log', title: 'Журнал' },
@@ -123,6 +125,8 @@
           <Home {view} {status} onstatus={(s) => (status = s)} />
         {:else if route === '/servers'}
           <Servers {view} {status} onstate={(v) => (view = v)} />
+        {:else if route === '/groups'}
+          <Groups {view} {status} onstate={(v) => (view = v)} />
         {:else if route === '/rules'}
           <Rules {view} onstate={(v) => (view = v)} />
         {:else if route === '/devices'}

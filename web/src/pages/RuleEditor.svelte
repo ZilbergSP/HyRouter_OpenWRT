@@ -1,19 +1,21 @@
 <script lang="ts">
-  import type { Action, Device, Rule, Server } from '../lib/types';
+  import type { Action, Rule, StateView } from '../lib/types';
+  import TargetSelect from '../lib/TargetSelect.svelte';
+  import FallbackList from '../lib/FallbackList.svelte';
 
   let {
     rule,
-    devices,
-    servers,
+    view,
     onsave,
     oncancel,
   }: {
     rule: Rule;
-    devices: Device[];
-    servers: Server[];
+    view: StateView;
     onsave: (r: Rule) => void;
     oncancel: () => void;
   } = $props();
+
+  const devices = $derived(view.devices);
 
   function initial() {
     const r = $state.snapshot(rule) as Rule;
@@ -27,6 +29,7 @@
       ports: r.ports ?? '',
       action: (r.action ?? 'tunnel') as Action,
       profile: r.profile ?? '',
+      fallback: r.fallback ?? [],
       enabled: r.enabled !== false,
     };
   }
@@ -57,7 +60,7 @@
     if (f.protocol) out.protocol = f.protocol;
     if (f.ports.trim()) out.ports = f.ports.trim();
     if (f.action === 'tunnel' && f.profile) out.profile = f.profile;
-    if (f.action === 'tunnel' && rule.fallback?.length) out.fallback = rule.fallback;
+    if (f.action === 'tunnel' && f.fallback.length) out.fallback = [...f.fallback];
     if (!f.enabled) out.enabled = false;
     onsave(out);
   }
@@ -119,14 +122,13 @@
 
   {#if f.action === 'tunnel'}
     <label class="field">
-      <span>Сервер</span>
-      <select bind:value={f.profile}>
-        <option value="">Основной сервер</option>
-        {#each servers as s (s.id)}
-          <option value={s.id}>{s.name}</option>
-        {/each}
-      </select>
+      <span>Сервер или группа</span>
+      <TargetSelect {view} bind:value={f.profile} />
     </label>
+    <div class="field">
+      <span class="label">Запасные: если основной не может пропустить соединение, берётся первый доступный из списка</span>
+      <FallbackList {view} bind:list={f.fallback} primary={f.profile} />
+    </div>
   {/if}
 
   <label class="check field"><input type="checkbox" bind:checked={f.enabled} /> Правило включено</label>
