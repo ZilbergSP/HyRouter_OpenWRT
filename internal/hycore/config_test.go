@@ -93,12 +93,17 @@ func TestConfigHopping(t *testing.T) {
 }
 
 func TestConfigRefuses(t *testing.T) {
+	with := func(f func(p *hysteria.Profile)) hysteria.Profile {
+		p := profile()
+		f(&p)
+		return p
+	}
 	for name, p := range map[string]hysteria.Profile{
 		"vless":     {ID: "v", Name: "v", Protocol: hysteria.ProtoVLESS, Host: "v.example", Ports: "443"},
-		"bandwidth": func() hysteria.Profile { p := profile(); p.Bandwidth.Up = "fast"; return p }(),
-		"obfs":      func() hysteria.Profile { p := profile(); p.Obfs = hysteria.Obfs{Type: "rot13", Password: "x"}; return p }(),
-		"ech":       func() hysteria.Profile { p := profile(); p.TLS.ECH = "%%%"; return p }(),
-		"ca":        func() hysteria.Profile { p := profile(); p.TLS.CA = "/nonexistent/ca.pem"; return p }(),
+		"bandwidth": with(func(p *hysteria.Profile) { p.Bandwidth.Up = "fast" }),
+		"obfs":      with(func(p *hysteria.Profile) { p.Obfs = hysteria.Obfs{Type: "rot13", Password: "x"} }),
+		"ech":       with(func(p *hysteria.Profile) { p.TLS.ECH = "%%%" }),
+		"ca":        with(func(p *hysteria.Profile) { p.TLS.CA = "/nonexistent/ca.pem" }),
 	} {
 		if _, err := Config(p, "198.51.100.7"); err == nil {
 			t.Errorf("%s: taken", name)

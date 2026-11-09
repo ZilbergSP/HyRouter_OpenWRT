@@ -32,8 +32,8 @@ zapret2 and the DPI bypass
 -------------------------------------------------------------------------
 
 zapret2 (https://github.com/bol-van/zapret2): nfqws2 (linux-arm64,
-linux-x86_64), its Lua scripts and fake payloads from the official v1.0.7
-release, each checked by its SHA-256 (build/deps.json); MIT, Copyright (c)
+linux-x86_64, linux-mipsel, linux-arm), its Lua scripts and fake payloads from the official v1.0.7
+release, checked by its SHA-256 (build/deps.json); MIT, Copyright (c)
 2016-2026 bol-van. The bypass methods in internal/zapret come from HyRoute,
 adapted from the presets of Zapret 2 GUI
 (https://github.com/TheFirstNoob/Zapret-2-GUI), MIT, Copyright (c) 2026
@@ -51,3 +51,19 @@ browser-like TLS handshake of the checks) with github.com/andybalholm/brotli
 (MIT) and github.com/klauspost/compress (BSD-3-Clause); golang.org/x/net,
 golang.org/x/crypto, golang.org/x/sys, golang.org/x/text (BSD-3-Clause);
 gopkg.in/yaml.v3 (MIT and Apache-2.0).
+
+-------------------------------------------------------------------------
+Hysteria 2 (HyRouter Lite)
+-------------------------------------------------------------------------
+
+HyRouter Lite links the client of Hysteria 2 as a library:
+github.com/apernet/hysteria/core/v2 and github.com/apernet/hysteria/extras/v2
+v2.12.3 (MIT, Copyright 2023 Toby), with github.com/apernet/quic-go
+(MIT, Copyright (c) 2016 the quic-go authors & Google, Inc.) and
+github.com/quic-go/qpack
+(MIT). internal/hycore builds its config the way app/cmd/client.go of
+Hysteria app/v2.12.3 does (MIT, the same copyright).
+
+Go modules besides: github.com/google/nftables (Apache-2.0),
+github.com/mdlayher/netlink and github.com/mdlayher/socket (MIT),
+golang.org/x/exp and golang.org/x/sync (BSD-3-Clause).

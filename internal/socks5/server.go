@@ -183,7 +183,12 @@ func (s *Server) connect(c net.Conn, dst Addr) {
 		return
 	}
 	defer up.Close()
-	reply(c, 0, AddrFromAddrPort(up.LocalAddr().(*net.TCPAddr).AddrPort()))
+	// A stream of Hysteria has no TCP address of its own.
+	bound := Addr{IP: netipV4zero}
+	if ta, ok := up.LocalAddr().(*net.TCPAddr); ok {
+		bound = AddrFromAddrPort(ta.AddrPort())
+	}
+	reply(c, 0, bound)
 	_ = c.SetDeadline(time.Time{})
 	Pipe(c, up)
 }

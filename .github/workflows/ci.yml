@@ -56,9 +56,22 @@ jobs:
         run: |
           git status --porcelain web/dist
           test -z "$(git status --porcelain web/dist)" || { echo "::error::web/dist is stale: run npm run build in web and commit it"; exit 1; }
+      # Every finding reached by a call fails, but those listed in
+      # .github/govulncheck-allow.txt with the reason they do not apply.
       - name: Known vulnerabilities (govulncheck)
         if: ${{ !cancelled() }}
-        run: go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...
+        run: |
+          go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 -format json ./... >"$RUNNER_TEMP/vuln.json"
+          jq -e 'select(.config != null)' "$RUNNER_TEMP/vuln.json" >/dev/null
+          jq -r 'select(.finding != null and .finding.trace[0].function != null) | .finding.osv' "$RUNNER_TEMP/vuln.json" | sort -u >"$RUNNER_TEMP/found.txt"
+          grep -o '^GO-[0-9]*-[0-9]*' .github/govulncheck-allow.txt | sort -u >"$RUNNER_TEMP/allowed.txt"
+          bad=$(comm -23 "$RUNNER_TEMP/found.txt" "$RUNNER_TEMP/allowed.txt")
+          echo "found: $(tr '\n' ' ' <"$RUNNER_TEMP/found.txt")"
+          if [ -n "$bad" ]; then
+            go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./... || true
+            echo "::error::govulncheck: $bad"
+            exit 1
+          fi
       # «Обход DPI»: the zapret2 release pinned in build/deps.json, every
       # file checked against its sum, the way hyrouterd will install it.
       - name: zapret2 release (build/deps.json)
