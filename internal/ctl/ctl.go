@@ -15,6 +15,7 @@ import (
 	"log/slog"
 	"net"
 	"net/netip"
+	"path/filepath"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -73,6 +74,10 @@ type Controller struct {
 	gview    atomic.Pointer[groupView]
 	gmu      sync.Mutex // scan
 	scan     scanState
+	geo      *geoCache
+	geoKick  chan bool
+	geoMu    sync.Mutex // one update of the rule database at a time
+	geoBusy  atomic.Bool
 
 	rules   rules.Store
 	policy  atomic.Pointer[dnspolicy.Policy]
@@ -118,6 +123,9 @@ func New(o Options) *Controller {
 	}
 	c.cache.MaxEntries = edition.Current.DNSCache
 	subs.MaxServers = edition.Current.SubServers
+	c.geo = newGeoCache(filepath.Join(o.Store.Dir, "geo"))
+	c.geoKick = make(chan bool, 1)
+	rules.SetGeo(c.geo)
 	c.route = kernel.PolicyRouting{Mark: nft.MarkTProxy, Mask: nft.MarkTProxy, Table: nft.RouteTable, Priority: nft.RulePriority}
 	c.groups = groups.NewRuntime(c.log)
 	c.tunnels = &tunnels.Manager{New: c.newRunner, Log: c.log, OnHealth: c.noteHealth, OnDial: c.groups.NoteDial}
@@ -200,9 +208,11 @@ func (c *Controller) Load() error {
 }
 
 // Run is the controller's background work until ctx ends: the
-// subscription updates.
+// subscription updates and the rule database.
 func (c *Controller) Run(ctx context.Context) {
 	go c.runSubs(ctx)
+	go c.runGeo(ctx)
+	c.kickGeo()
 	<-ctx.Done()
 }
 

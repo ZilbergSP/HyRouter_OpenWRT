@@ -93,7 +93,7 @@
 
   <label class="field">
     <span>Сайты и адреса, по одному в строке (пусто — любые)</span>
-    <textarea rows="5" bind:value={f.sites} placeholder={'.youtube.com — сайт и его поддомены\nkinopoisk.ru — только этот адрес\n203.0.113.0/24 — сеть'}></textarea>
+    <textarea rows="5" bind:value={f.sites} placeholder={'.youtube.com — сайт и его поддомены\nkinopoisk.ru — только этот адрес\n203.0.113.0/24 — сеть\ngeosite:ru-blocked — категория сайтов\ngeoip:ru — адреса страны'}></textarea>
   </label>
 
   <div class="two">

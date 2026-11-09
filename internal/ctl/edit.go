@@ -55,6 +55,7 @@ func (c *Controller) editLocked(ctx context.Context, change func(*store.State) e
 		return &EditError{NotApplied, err}
 	}
 	c.syncGuard(st.Settings)
+	c.kickGeo()
 	return nil
 }
 

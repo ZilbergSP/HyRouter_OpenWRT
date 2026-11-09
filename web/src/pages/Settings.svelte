@@ -1,6 +1,7 @@
 <script lang="ts">
   import { api, errorText } from '../lib/api';
   import type { StateView } from '../lib/types';
+  import Geo from './Geo.svelte';
 
   let {
     view,
@@ -91,6 +92,8 @@
   {#if saved}<div class="notice ok">Настройки сохранены.</div>{/if}
   <button class="primary" type="submit" disabled={busy}>{busy ? 'Сохраняю…' : 'Сохранить'}</button>
 </form>
+
+<Geo {view} {onstate} />
 
 <div class="card">
   <h2>Порты</h2>

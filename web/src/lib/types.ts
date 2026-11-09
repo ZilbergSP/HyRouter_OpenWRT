@@ -125,6 +125,26 @@ export interface Sub {
   missing: number;
 }
 
+export interface GeoSource {
+  id: string;
+  name: string;
+  description: string;
+  size: string;
+}
+
+export interface GeoStatus {
+  source: string;
+  sources: GeoSource[];
+  auto: boolean;
+  updated?: string;
+  checked?: string;
+  error?: string;
+  busy: boolean;
+  sites: string[];
+  ips: string[];
+  missing: string[];
+}
+
 export interface MergeStats {
   added: number;
   updated: number;

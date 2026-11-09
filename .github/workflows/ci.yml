@@ -66,7 +66,7 @@ jobs:
         run: |
           z="$RUNNER_TEMP/zapret2"
           mkdir -p "$z"
-          curl -fsSL "$(jq -r .zapret2.url build/deps.json)" -o "$z/release.zip"
+          curl -fsSL --retry 4 --retry-all-errors "$(jq -r .zapret2.url build/deps.json)" -o "$z/release.zip"
           echo "$(jq -r .zapret2.sha256 build/deps.json)  $z/release.zip" | sha256sum -c
           unzip -q "$z/release.zip" -d "$z"
           jq -r --arg z "$z" '.zapret2.files | to_entries[] | "\(.value)  \($z)/\(.key)"' build/deps.json | sha256sum -c

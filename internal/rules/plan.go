@@ -31,9 +31,9 @@ type PlanRule struct {
 	MACs    []MAC
 	Sources []netip.Prefix
 	// Dest: the rule names destinations; a connection matches when its
-	// address is in Nets, or in the rule's DNS sets when Sites. GeoIP
-	// items are not in Nets: the kernel does not see them yet, and they
-	// match nothing without the rule database.
+	// address is in Nets, or in the rule's DNS sets when Sites. Nets hold
+	// the networks of its geoip categories too; a category without data
+	// matches nothing.
 	Dest  bool
 	Nets  []netip.Prefix
 	Sites bool
@@ -68,6 +68,8 @@ func (s *Set) Plan() ([]PlanRule, Result) {
 		for _, ip := range r.ips {
 			if ip.pfx.IsValid() {
 				p.Nets = append(p.Nets, ip.pfx)
+			} else if pl, ok := ip.geo.(interface{ Prefixes() []netip.Prefix }); ok {
+				p.Nets = append(p.Nets, pl.Prefixes()...)
 			}
 		}
 		out = append(out, p)

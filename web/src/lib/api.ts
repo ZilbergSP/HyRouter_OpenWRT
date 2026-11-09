@@ -4,6 +4,7 @@
 import type {
   Device,
   EditResp,
+  GeoStatus,
   Group,
   GroupProbe,
   LogEntry,
@@ -91,6 +92,9 @@ export const api = {
   editSub: (id: string, s: SubInput) => call<EditResp>('PUT', `/api/subs/${encodeURIComponent(id)}`, s),
   updateSub: (id: string) => call<EditResp & { stats: MergeStats }>('POST', `/api/subs/${encodeURIComponent(id)}/update`, {}),
   deleteSub: (id: string) => call<EditResp>('DELETE', `/api/subs/${encodeURIComponent(id)}`),
+  geo: () => call<GeoStatus>('GET', '/api/geo'),
+  saveGeo: (g: { source: string; auto: boolean }) => call<EditResp & { geo: GeoStatus }>('PUT', '/api/geo', g),
+  updateGeo: () => call<GeoStatus>('POST', '/api/geo/update', {}),
   saveSettings: (s: { lan: string[]; dnsByRules: boolean; dnsTunnel: string; killSwitch: boolean }) =>
     call<EditResp>('PUT', '/api/settings', s),
   log: (after: number) => call<LogEntry[]>('GET', `/api/log?after=${after}`),
