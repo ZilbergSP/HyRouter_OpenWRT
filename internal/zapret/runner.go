@@ -174,6 +174,12 @@ func (r *Runner) supervise(gen uint64, args []string) {
 
 // exitReason: nfqws2's last error line says best why it ended.
 func exitReason(err error, lines []string) string {
+	// The kernel refuses a queue another program has bound (queues.go).
+	for _, l := range lines {
+		if strings.Contains(l, "nfq_create_queue") && strings.Contains(strings.ToLower(l), "not permitted") {
+			return "nfqws2 остановился: его очередь NFQUEUE занята другой программой. Похоже, на роутере работает ещё один обход DPI (zapret, nfqws-keenetic)"
+		}
+	}
 	for i := len(lines) - 1; i >= 0 && i >= len(lines)-5; i-- {
 		l := strings.ToLower(lines[i])
 		if strings.Contains(l, "error") || strings.Contains(l, "fail") || strings.Contains(l, "cannot") || strings.Contains(l, "invalid") {

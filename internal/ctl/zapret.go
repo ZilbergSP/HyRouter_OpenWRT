@@ -103,6 +103,12 @@ type zapretCtl struct {
 	extra atomic.Pointer[string]
 	// probes: the table holds the probe chains (a pick runs).
 	probes atomic.Bool
+	// qnum: the queue of the bypass, the testers' queues follow it
+	// (PickQueue; 0 before the first apply: QNumBypass). queueNote: who
+	// holds the default queues ("" when no one). Written with mu and pmu
+	// held.
+	qnum      int
+	queueNote string
 
 	pmu       sync.Mutex // pick, cancel, heal
 	pick      *ZapretPickView
@@ -115,6 +121,69 @@ type zapretCtl struct {
 type autoPick struct {
 	at    time.Time
 	found bool
+}
+
+// queue is the queue of the bypass (mu held).
+func (z *zapretCtl) queue() int {
+	if z.qnum == 0 {
+		return zapret.QNumBypass
+	}
+	return z.qnum
+}
+
+// zapretQueue is the queue of the bypass: QNumBypass unless another
+// program holds a queue of its range (another DPI bypass on the router:
+// zapret and nfqws-keenetic take 200), then the next free range; and the
+// first queue of the default range another program holds, with who it is
+// (0, "" when none). An nfqws2 of HyRouter whose hyrouterd is gone is
+// killed instead (mu held).
+func (c *Controller) zapretQueue() (base, heldQ int, heldBy string) {
+	bound, err := zapret.BoundQueues()
+	if err != nil {
+		c.log.Warn("zapret: the bound queues not read", "err", err)
+		return zapret.QNumBypass, 0, ""
+	}
+	me, exe := os.Getpid(), filepath.Join(ZapretDir, "nfqws2")
+	running := c.zap.run != nil && c.zap.run.Status().State == zapret.Running
+	foreign := func(q int, port int64) bool {
+		h, ok := zapret.FindHolder(port)
+		switch {
+		case !ok && running && q == c.zap.queue():
+			// A port ID that is no process ID, on the queue of the nfqws2
+			// that runs: its own.
+			return false
+		case ok && h.Parent == me:
+			return false // the bypass or a tester
+		case ok && h.Exe == exe:
+			if p, err := os.FindProcess(h.PID); err == nil && p.Kill() == nil {
+				c.log.Warn("zapret: a leftover nfqws2 killed", "pid", h.PID, "queue", q)
+				return false
+			}
+		}
+		if heldBy == "" && q < zapret.QNumBypass+zapret.ProbeSlots {
+			heldQ, heldBy = q, "неизвестная программа"
+			if ok {
+				heldBy = fmt.Sprintf("%s (PID %d)", h.Name, h.PID)
+			}
+		}
+		return true
+	}
+	// foreign sets heldQ and heldBy: read them after the call.
+	base = zapret.PickQueue(bound, foreign)
+	return base, heldQ, heldBy
+}
+
+// queueNote tells the page that another program holds a queue of the
+// bypass ("" when none does).
+func queueNote(base, heldQ int, heldBy string) string {
+	if heldBy == "" {
+		return ""
+	}
+	s := fmt.Sprintf("Очередь NFQUEUE %d занята другой программой: %s. Похоже, на роутере работает ещё один обход DPI (zapret, nfqws-keenetic). ", heldQ, heldBy)
+	if base != zapret.QNumBypass {
+		s += fmt.Sprintf("HyRouter взял очереди %d–%d, но ", base, base+zapret.ProbeSlots-1)
+	}
+	return s + "два обхода мешают друг другу, а подбор проверяет сайты вместе с чужим обходом: оставьте один."
 }
 
 // zapretExtra is the bypass's part of the firewall's rules (fwZapret).
@@ -218,6 +287,9 @@ func (c *Controller) zapretApplyLocked() {
 	}
 	stop := func(why string) {
 		set(nil, why)
+		c.zap.pmu.Lock()
+		c.zap.queueNote = ""
+		c.zap.pmu.Unlock()
 		run.Stop()
 		c.setZapretExtra("")
 	}
@@ -250,8 +322,16 @@ func (c *Controller) zapretApplyLocked() {
 		stop("не найден интерфейс WAN")
 		return
 	}
+	qnum, heldQ, heldBy := c.zapretQueue()
+	note := queueNote(qnum, heldQ, heldBy)
+	if note != "" && (note != c.zap.queueNote || qnum != c.zap.queue()) {
+		c.log.Warn("zapret: a queue is held by another program", "queue", heldQ, "holder", heldBy, "base", qnum)
+	}
+	c.zap.pmu.Lock()
+	c.zap.qnum, c.zap.queueNote = qnum, note
+	c.zap.pmu.Unlock()
 	skip := c.zapretServers()
-	extra, err := fwZapret(zapret.NFTConfig{WAN: wan, Queue: zapret.QueueFor(plans), Probes: c.zap.probes.Load(), Skip: skip})
+	extra, err := fwZapret(zapret.NFTConfig{WAN: wan, Queue: zapret.QueueFor(plans), Probes: c.zap.probes.Load(), Skip: skip, QNum: qnum})
 	if err != nil {
 		stop(err.Error())
 		return
@@ -270,7 +350,7 @@ func (c *Controller) zapretApplyLocked() {
 	if err := zapret.WriteFakes(ZapretLists); err != nil {
 		c.log.Warn("zapret: fakes not written", "err", err)
 	}
-	args, err := zapret.Build(zapret.BuildConfig{Dir: ZapretDir, Lists: ZapretLists, Plans: plans, Sites: cfg.Sites, QNum: zapret.QNumBypass, User: zapretUser})
+	args, err := zapret.Build(zapret.BuildConfig{Dir: ZapretDir, Lists: ZapretLists, Plans: plans, Sites: cfg.Sites, QNum: qnum, User: zapretUser})
 	if err != nil {
 		stop("командная строка не собрана: " + err.Error())
 		return
@@ -495,6 +575,7 @@ type ZapretView struct {
 	Settings    zapret.Settings    `json:"settings"`
 	Status      zapret.Status      `json:"status"`
 	Error       string             `json:"error,omitempty"`
+	QueueNote   string             `json:"queueNote,omitempty"`
 	Network     string             `json:"network"`
 	WAN         []string           `json:"wan"`
 	Offload     bool               `json:"offload"`
@@ -511,7 +592,7 @@ func (c *Controller) ZapretInfo() ZapretView {
 	cfg, err := zapretSettings(c.State())
 	c.zap.pmu.Lock()
 	v := ZapretView{Available: zapretAvailable(), Routing: c.Running(), Settings: cfg, Network: c.zap.net,
-		WAN: slices.Clone(c.zap.wan), Error: c.zap.err}
+		WAN: slices.Clone(c.zap.wan), Error: c.zap.err, QueueNote: c.zap.queueNote}
 	args, key := c.zap.args, c.zap.key
 	c.zap.pmu.Unlock()
 	v.Status, v.Offload = c.zapretRunner().Status(), platform.Offload(context.Background())
@@ -746,7 +827,7 @@ func (c *Controller) zapretPickRun(why string) {
 					plans[t] = zapret.Plan{Methods: []string{id}}
 				}
 				args, err := zapret.Build(zapret.BuildConfig{Dir: ZapretDir, Lists: ZapretLists, Plans: plans, Sites: cfg.Sites,
-					QNum: zapret.QNumBypass + i + 1, User: zapretUser})
+					QNum: c.zap.queue() + i + 1, User: zapretUser})
 				if err != nil {
 					for _, r := range testers[:i] {
 						r.Stop()

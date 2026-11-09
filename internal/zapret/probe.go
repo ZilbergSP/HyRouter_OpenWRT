@@ -89,7 +89,7 @@ const Passes = 2
 
 // Probe ports. The checks connect from the router itself, from fixed local
 // port ranges, one per slot: slot 0 checks without any bypass, slot i (1…)
-// belongs to the nfqws2 that tries method i on queue QNumBypass+i. The
+// belongs to the nfqws2 that tries method i on queue NFTConfig.QNum+i. The
 // nftables rules (NFT) send a slot's packets to its queue only, and the
 // bypass of the LAN never sees the range, so a pick runs next to it
 // without stopping it, and all methods are tried at once. The range lies

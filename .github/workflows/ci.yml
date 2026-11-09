@@ -102,7 +102,10 @@ jobs:
           go test -c -o "$RUNNER_TEMP/nft.test" ./internal/nft
           "$RUNNER_TEMP/nft.test" -test.v -test.run NFTFiles
           # As root, like hyrouterd: nfqws2 drops to --user only from root.
-          sudo HYROUTER_ZAPRET_DIR="$zdir" "$RUNNER_TEMP/zapret.test" -test.v -test.run NFQWS2DryRun
+          # QueueTaken: another nfqws2 holds queue 200 (no rule sends it
+          # packets), as another DPI bypass on a router does.
+          sudo modprobe nfnetlink_queue || true
+          sudo HYROUTER_ZAPRET_DIR="$zdir" "$RUNNER_TEMP/zapret.test" -test.v -test.run 'NFQWS2DryRun|QueueTaken'
           sudo apt-get install -y -qq nftables >/dev/null
           for f in "$HYROUTER_NFT_DIR"/*.nft; do
             echo "== $f"

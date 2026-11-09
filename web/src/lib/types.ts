@@ -236,6 +236,7 @@ export interface ZapretView {
   };
   status: { state: string; error?: string; restarts: number; lines: string[] };
   error?: string;
+  queueNote?: string;
   network: string;
   wan: string[];
   offload: boolean;

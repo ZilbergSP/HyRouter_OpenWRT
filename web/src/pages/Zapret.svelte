@@ -117,6 +117,9 @@
 {#if z && !z.available}
   <div class="notice bad">В этой сборке нет nfqws2: обход DPI недоступен.</div>
 {/if}
+{#if z?.queueNote}
+  <div class="notice bad">{z.queueNote}</div>
+{/if}
 {#if view.platform === 'keenetic'}
   <div class="notice">
     Сетевой ускоритель Кинетика может пропускать первые пакеты соединений мимо обхода. Если сайты открываются через

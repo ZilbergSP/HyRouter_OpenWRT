@@ -27,8 +27,9 @@ const (
 	// PostNATMark is set on the packets queued after NAT: what nfqws2
 	// makes of them is not tracked.
 	PostNATMark = 0x20000000
-	// QNumBypass is the queue of the bypass of the LAN; the tester of
-	// probe slot i takes QNumBypass+i.
+	// QNumBypass is the queue of the bypass of the LAN (the tester of
+	// probe slot i takes QNumBypass+i) unless another program holds one of
+	// them: then PickQueue moves the range by 100.
 	QNumBypass = 200
 )
 
@@ -60,6 +61,20 @@ type NFTConfig struct {
 	// Skip: HyRouter's server addresses, never queued (the sets
 	// SetSkip4/6 start with them).
 	Skip []netip.Addr
+	// QNum: the queue of the bypass of the LAN; the tester of probe slot
+	// i takes QNum+i (0: QNumBypass; PickQueue chooses it).
+	QNum int
+}
+
+// qnum is the queue of the bypass of the LAN.
+func (c NFTConfig) qnum() (int, error) {
+	switch {
+	case c.QNum == 0:
+		return QNumBypass, nil
+	case c.QNum < 0 || c.QNum+ProbeSlots > 65536:
+		return 0, fmt.Errorf("zapret: неверный номер очереди %d", c.QNum)
+	}
+	return c.QNum, nil
 }
 
 // skipElems is the elements of a skip set.
@@ -90,6 +105,10 @@ func NFT(c NFTConfig) (string, error) {
 		if !validPortItem(p) {
 			return "", fmt.Errorf("zapret: неверный порт %q", p)
 		}
+	}
+	qn, err := c.qnum()
+	if err != nil {
+		return "", err
 	}
 	wan := "{ " + quoteJoin(c.WAN) + " }"
 	lo, _ := ProbeSlot(0)
@@ -129,10 +148,10 @@ func NFT(c NFTConfig) (string, error) {
 		w("\t\ttcp sport %s return", probes)
 	}
 	if len(c.Queue.TCP) > 0 {
-		w("\t\ttcp dport { %s } ct original packets 1-%d %s", strings.Join(c.Queue.TCP, ", "), tcpPktOut, queue(QNumBypass))
+		w("\t\ttcp dport { %s } ct original packets 1-%d %s", strings.Join(c.Queue.TCP, ", "), tcpPktOut, queue(qn))
 	}
 	if len(c.Queue.UDP) > 0 {
-		w("\t\tudp dport { %s } ct original packets 1-%d %s", strings.Join(c.Queue.UDP, ", "), udpPktOut, queue(QNumBypass))
+		w("\t\tudp dport { %s } ct original packets 1-%d %s", strings.Join(c.Queue.UDP, ", "), udpPktOut, queue(qn))
 	}
 	w("\t}")
 	if c.Probes {
@@ -140,7 +159,7 @@ func NFT(c NFTConfig) (string, error) {
 		w("\tchain zapret_probe {")
 		for i := 1; i < ProbeSlots; i++ {
 			slo, shi := ProbeSlot(i)
-			w("\t\ttcp sport %d-%d ct original packets 1-%d %s", slo, shi, tcpPktOut, queue(QNumBypass+i))
+			w("\t\ttcp sport %d-%d ct original packets 1-%d %s", slo, shi, tcpPktOut, queue(qn+i))
 		}
 		w("\t}")
 	}
@@ -168,7 +187,7 @@ func NFT(c NFTConfig) (string, error) {
 			w("\t\ttcp dport %s return", probes)
 		}
 		if len(c.Queue.TCP) > 0 {
-			w("\t\ttcp sport { %s } ct reply packets %s queue num %d bypass", strings.Join(c.Queue.TCP, ", "), in, QNumBypass)
+			w("\t\ttcp sport { %s } ct reply packets %s queue num %d bypass", strings.Join(c.Queue.TCP, ", "), in, qn)
 		}
 		w("\t}")
 	}
@@ -177,7 +196,7 @@ func NFT(c NFTConfig) (string, error) {
 		w("\tchain zapret_probe_in {")
 		for i := 1; i < ProbeSlots; i++ {
 			slo, shi := ProbeSlot(i)
-			w("\t\ttcp dport %d-%d ct reply packets 1 queue num %d bypass", slo, shi, QNumBypass+i)
+			w("\t\ttcp dport %d-%d ct reply packets 1 queue num %d bypass", slo, shi, qn+i)
 		}
 		w("\t}")
 	}

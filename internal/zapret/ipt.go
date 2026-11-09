@@ -53,6 +53,10 @@ func IPT(c NFTConfig, v6 bool) (ipt.Part, error) {
 	if err != nil {
 		return p, err
 	}
+	qn, err := c.qnum()
+	if err != nil {
+		return p, err
+	}
 	lo, _ := ProbeSlot(0)
 	_, hi := ProbeSlot(ProbeSlots - 1)
 	probes := fmt.Sprintf("%d:%d", lo, hi)
@@ -99,17 +103,17 @@ func IPT(c NFTConfig, v6 bool) (ipt.Part, error) {
 			add("-A %s -p tcp --sport %s -j RETURN", chZOut, probes)
 		}
 		for _, l := range tcp {
-			add("-A %s %s %s %s", chZOut, portMatch("tcp", l, false), first("original", tcpPktOut), queue(QNumBypass))
+			add("-A %s %s %s %s", chZOut, portMatch("tcp", l, false), first("original", tcpPktOut), queue(qn))
 		}
 		for _, l := range udp {
-			add("-A %s %s %s %s", chZOut, portMatch("udp", l, false), first("original", udpPktOut), queue(QNumBypass))
+			add("-A %s %s %s %s", chZOut, portMatch("udp", l, false), first("original", udpPktOut), queue(qn))
 		}
 		if c.Probes {
 			// Slot 0 checks without a bypass: no rule, the goto ends in accept.
 			t.Chains = append(t.Chains, chZProbe)
 			for i := 1; i < ProbeSlots; i++ {
 				slo, shi := ProbeSlot(i)
-				add("-A %s -p tcp --sport %d:%d %s %s", chZProbe, slo, shi, first("original", tcpPktOut), queue(QNumBypass+i))
+				add("-A %s -p tcp --sport %d:%d %s %s", chZProbe, slo, shi, first("original", tcpPktOut), queue(qn+i))
 			}
 		}
 		// In: the answers, after NAT. The first one always (the SYN-ACK,
@@ -133,13 +137,13 @@ func IPT(c NFTConfig, v6 bool) (ipt.Part, error) {
 				add("-A %s -p tcp --dport %s -j RETURN", chZReply, probes)
 			}
 			for _, l := range tcp {
-				add("-A %s %s %s %s", chZReply, portMatch("tcp", l, true), first("reply", in), queue(QNumBypass))
+				add("-A %s %s %s %s", chZReply, portMatch("tcp", l, true), first("reply", in), queue(qn))
 			}
 			if c.Probes {
 				t.Chains = append(t.Chains, chZProbeIn)
 				for i := 1; i < ProbeSlots; i++ {
 					slo, shi := ProbeSlot(i)
-					add("-A %s -p tcp --dport %d:%d %s %s", chZProbeIn, slo, shi, first("reply", 1), queue(QNumBypass+i))
+					add("-A %s -p tcp --dport %d:%d %s %s", chZProbeIn, slo, shi, first("reply", 1), queue(qn+i))
 				}
 			}
 		}

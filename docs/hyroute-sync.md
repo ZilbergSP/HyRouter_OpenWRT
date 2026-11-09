@@ -30,7 +30,7 @@ internal/<пакет>`, перенести нужное, поправить в �
 | `tunnels` | 01032d2 | как есть |
 | `vless` | 01032d2 | как есть |
 | `subs` | 01032d2 | из `internal/app` HyRoute: `links.go`, `merge.go`, `subinfo.go` (без предупреждений и ссылки поддержки контроллера) и загрузка, разбор и маски из `subs.go` (`fetch.go`, без снимков для отката) |
-| `zapret` | 01032d2 | `nfqws2` вместо `winws2`: `--qnum`/`--fwmark`/`--user` вместо фильтров WinDivert (`build.go`), правила nftables (`nft.go`, новый; SYN-ACK всегда в очередь — для `ip_autottl`), без `ProbeExclude`/`ProbeOnly` и без быстрого перезапуска при 0xC0000142 (`DLLInitFailed`, только Windows); методы, генератор, фейки, списки, план, подбор, проверки и супервизор — как есть; `NFTConfig.Skip`: адреса серверов сразу в наборах исключений |
+| `zapret` | 01032d2 | `nfqws2` вместо `winws2`: `--qnum`/`--fwmark`/`--user` вместо фильтров WinDivert (`build.go`), правила nftables (`nft.go`, новый; SYN-ACK всегда в очередь — для `ip_autottl`), очереди, занятые другой программой (`queues.go`, новый; причина в `exitReason`), без `ProbeExclude`/`ProbeOnly` и без быстрого перезапуска при 0xC0000142 (`DLLInitFailed`, только Windows); методы, генератор, фейки, списки, план, подбор, проверки и супервизор — как есть; `NFTConfig.Skip`: адреса серверов сразу в наборах исключений |
 
 Переделаны под роутер, а не скопированы: `relay` (TPROXY вместо
 reflect-NAT), `store`, контроллер `ctl`. Из контроллера `app` HyRoute

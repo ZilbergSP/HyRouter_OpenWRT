@@ -50,9 +50,10 @@ type BuildConfig struct {
 	// Sites: the own sites (Settings.Sites). Their addresses and networks
 	// get profiles by address (--ipset), the names by name.
 	Sites []string
-	// QNum is the NFQUEUE nfqws2 takes its packets from: QNumBypass for
-	// the bypass of the LAN, QNumBypass+i for the tester of probe slot i.
-	// The nftables rules (NFT) decide which packets reach each queue.
+	// QNum is the NFQUEUE nfqws2 takes its packets from: NFTConfig.QNum
+	// (QNumBypass unless another program holds it) for the bypass of the
+	// LAN, QNum+i for the tester of probe slot i. The rules (NFT, IPT)
+	// decide which packets reach each queue.
 	QNum int
 	// User: nfqws2 drops root for this user once its queue is open ("" =
 	// it keeps root). On OpenWrt it is "daemon", as zapret2's own service.
