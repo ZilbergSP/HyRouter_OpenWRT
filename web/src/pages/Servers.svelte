@@ -1,6 +1,8 @@
 <script lang="ts">
   import { api, errorText } from '../lib/api';
   import type { StateView, Status } from '../lib/types';
+  import { ownServers } from '../lib/targets';
+  import Subs from './Subs.svelte';
 
   let { view, status, onstate }: { view: StateView; status: Status; onstate: (v: StateView) => void } = $props();
 
@@ -108,11 +110,11 @@
 
 <div class="card">
   <h2>Ваши серверы</h2>
-  {#if view.servers.length === 0}
-    <p class="muted">Серверов пока нет.</p>
+  {#if ownServers(view).length === 0}
+    <p class="muted">Серверов, добавленных по ссылке, пока нет{view.subs.length ? ': серверы подписок — ниже' : ''}.</p>
   {:else}
     <ul class="list">
-      {#each view.servers as s (s.id)}
+      {#each ownServers(view) as s (s.id)}
         {@const st = statusOf(s.id)}
         <li>
           {#if renaming === s.id}
@@ -145,6 +147,8 @@
     </ul>
   {/if}
 </div>
+
+<Subs {view} {status} {onstate} />
 
 <style>
   .grow {

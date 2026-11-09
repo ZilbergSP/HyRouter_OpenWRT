@@ -24,6 +24,8 @@ type Limits struct {
 	// (a process each); a larger group runs its best ones and measures
 	// the others a few at a time.
 	GroupRun int
+	// SubServers bounds the servers taken from one subscription.
+	SubServers int
 }
 
 // SetMemoryLimit applies Current.Memory unless GOMEMLIMIT is set in the

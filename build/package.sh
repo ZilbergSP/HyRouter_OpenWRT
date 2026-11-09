@@ -52,6 +52,7 @@ for t in "${TARGETS[@]}"; do
 		mkdir -p "$tree/root/usr/bin" "$tree/root/etc/init.d" "$tree/root/lib/upgrade/keep.d" "$tree/control"
 		install -m 0755 "$bin" "$tree/root/usr/bin/hyrouterd"
 		install -m 0755 "$ROOT/build/openwrt/hyrouter.init" "$tree/root/etc/init.d/hyrouter"
+		install -m 0755 "$ROOT/build/openwrt/hyrouter-guard.init" "$tree/root/etc/init.d/hyrouter-guard"
 		echo /etc/hyrouter/ >"$tree/root/lib/upgrade/keep.d/hyrouter"
 		install -m 0755 "$ROOT/build/openwrt/postinst" "$ROOT/build/openwrt/prerm" "$tree/control/"
 		size=$(du -sb "$tree/root" | cut -f1)

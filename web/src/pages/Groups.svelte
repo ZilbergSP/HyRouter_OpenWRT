@@ -38,6 +38,15 @@
     return view.servers.find((s) => s.id === id)?.name ?? id;
   }
 
+  function membersText(g: Group): string {
+    const parts = g.members.map(serverName);
+    for (const id of g.subs ?? []) {
+      const s = view.subs.find((x) => x.id === id);
+      parts.push(s ? `подписка «${s.name}»` : 'удалённая подписка');
+    }
+    return parts.length > 0 ? parts.join(', ') : 'серверов нет';
+  }
+
   function statusOf(id: string): GroupStatus | undefined {
     return status.groups.find((g) => g.id === id);
   }
@@ -146,6 +155,25 @@
       </div>
     </div>
 
+    {#if view.subs.length > 0}
+      <div class="field">
+        <span class="label">Все серверы подписок (группа следит за их обновлениями)</span>
+        <div class="chips">
+          {#each view.subs as s (s.id)}
+            <label class="chip check">
+              <input
+                type="checkbox"
+                checked={form.subs?.includes(s.id)}
+                onchange={(e) =>
+                  (form.subs = e.currentTarget.checked ? [...(form.subs ?? []), s.id] : (form.subs ?? []).filter((x) => x !== s.id))}
+              />
+              {s.name} ({s.servers})
+            </label>
+          {/each}
+        </div>
+      </div>
+    {/if}
+
     {#if form.strategy === 'failover'}
       <label class="check field">
         <input type="checkbox" bind:checked={form.revert} /> Возвращаться к серверу выше по списку, когда он снова заработает
@@ -224,7 +252,7 @@
             {/if}
           {:else}
             <div class="muted small">
-              {g.members.length > 0 ? g.members.map(serverName).join(', ') : 'серверов нет'}
+              {membersText(g)}
               · не используется правилами или HyRouter выключен
             </div>
           {/if}

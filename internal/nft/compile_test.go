@@ -176,6 +176,11 @@ func TestNFTFiles(t *testing.T) {
 		"hyrouter-default-tunnel.nft": compileConfig(t, rules.Config{DefaultAction: rules.Tunnel}, "p1", testOptions),
 		"hyrouter-no-server.nft":      compileConfig(t, sample(), "", Options{LAN: []string{"br-lan", "br-guest"}, TunnelPort: 7701, NamePort: 7702, DNSPort: 7753}),
 	}
+	guard, err := GuardScript([]string{"br-lan", "br-guest"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	files["hyrouter-guard.nft"] = guard
 	for name, script := range files {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(script), 0o644); err != nil {
 			t.Fatal(err)

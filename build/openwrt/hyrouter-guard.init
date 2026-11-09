@@ -1,0 +1,37 @@
+#!/bin/sh /etc/rc.common
+# HyRouter's kill switch while the router boots: when routing is on and
+# «Блокировать интернет при загрузке» is chosen, the LAN reaches nothing
+# beyond the router until hyrouterd has loaded its rules (it removes this
+# table then). Before the network and the firewall come up.
+
+# shellcheck disable=SC2034
+START=11
+
+boot() {
+	f=/etc/hyrouter/settings.json
+	[ -f "$f" ] || return 0
+	[ "$(jsonfilter -i "$f" -e '@.enabled')" = "true" ] || return 0
+	[ "$(jsonfilter -i "$f" -e '@.killSwitch')" = "true" ] || return 0
+	ifs=""
+	for i in $(jsonfilter -i "$f" -e '@.lan[*]'); do
+		case "$i" in
+		*[!A-Za-z0-9._@-]*) continue ;;
+		esac
+		ifs="${ifs:+$ifs, }\"$i\""
+	done
+	[ -n "$ifs" ] || ifs='"br-lan"'
+	nft -f - <<NFT
+table inet hyrouter_guard
+delete table inet hyrouter_guard
+table inet hyrouter_guard {
+	chain forward {
+		type filter hook forward priority filter - 10; policy accept;
+		iifname { $ifs } counter reject with icmpx admin-prohibited
+	}
+}
+NFT
+}
+
+start() {
+	return 0
+}

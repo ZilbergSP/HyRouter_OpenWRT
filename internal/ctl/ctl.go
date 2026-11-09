@@ -35,6 +35,7 @@ import (
 	"github.com/zilbergsp/hyrouter/internal/rules"
 	"github.com/zilbergsp/hyrouter/internal/socks5"
 	"github.com/zilbergsp/hyrouter/internal/store"
+	"github.com/zilbergsp/hyrouter/internal/subs"
 	"github.com/zilbergsp/hyrouter/internal/tunnels"
 )
 
@@ -53,6 +54,8 @@ type Options struct {
 	Store    *store.Store
 	Log      *slog.Logger
 	Redactor *logx.Redactor
+	// Version is hyrouterd's (the User-Agent of downloads).
+	Version string
 }
 
 // Controller owns routing. Its methods are safe for concurrent use.
@@ -65,6 +68,7 @@ type Controller struct {
 	cache    *dnscache.Cache
 	resolver *dnsproxy.Resolver
 	tunnels  *tunnels.Manager
+	version  string
 	groups   *groups.Runtime
 	gview    atomic.Pointer[groupView]
 	gmu      sync.Mutex // scan
@@ -86,6 +90,11 @@ type Controller struct {
 	issues  []string
 	// probeStop ends the prober and the scanner of groups.
 	probeStop context.CancelFunc
+
+	// editMu: one edit of the settings at a time (Edit).
+	editMu sync.Mutex
+	// subMu: one subscription update at a time.
+	subMu sync.Mutex
 }
 
 // New makes a controller that is not routing yet.
@@ -94,6 +103,7 @@ func New(o Options) *Controller {
 		store:    o.Store,
 		log:      o.Log,
 		redactor: o.Redactor,
+		version:  o.Version,
 		cores:    &cores.Installer{Dir: CoresDir},
 		cache:    dnscache.New(),
 	}
@@ -107,6 +117,7 @@ func New(o Options) *Controller {
 		c.cores.Spare = SpareCoresDir
 	}
 	c.cache.MaxEntries = edition.Current.DNSCache
+	subs.MaxServers = edition.Current.SubServers
 	c.route = kernel.PolicyRouting{Mark: nft.MarkTProxy, Mask: nft.MarkTProxy, Table: nft.RouteTable, Priority: nft.RulePriority}
 	c.groups = groups.NewRuntime(c.log)
 	c.tunnels = &tunnels.Manager{New: c.newRunner, Log: c.log, OnHealth: c.noteHealth, OnDial: c.groups.NoteDial}
@@ -174,11 +185,25 @@ func (c *Controller) Load() error {
 	if err != nil {
 		return err
 	}
+	if st.Settings.DeviceID == "" {
+		st.Settings.DeviceID = randomID(16)
+		if err := c.store.SaveSettings(st.Settings); err != nil {
+			c.log.Warn("settings not saved", "err", err)
+		}
+	}
 	c.mu.Lock()
 	c.st = st
 	c.mu.Unlock()
 	c.setSecrets(st.Servers)
+	c.subSecrets(st.Subs)
 	return nil
+}
+
+// Run is the controller's background work until ctx ends: the
+// subscription updates.
+func (c *Controller) Run(ctx context.Context) {
+	go c.runSubs(ctx)
+	<-ctx.Done()
 }
 
 // setSecrets hides the servers' passwords in every log line.
@@ -429,6 +454,10 @@ func (c *Controller) startLocked(ctx context.Context) error {
 	if err := nft.Load(ctx, cp.script); err != nil {
 		return err
 	}
+	// HyRouter's table decides the LAN now: the boot's kill switch goes.
+	if err := nft.RemoveGuard(ctx); err != nil {
+		c.log.Warn("kill switch: not removed", "err", err)
+	}
 	c.dns.Refill()
 	c.startProber()
 	for _, i := range cp.issues {
@@ -540,6 +569,9 @@ type Status struct {
 	Servers []tunnels.Status `json:"servers"`
 	Groups  []GroupStatus    `json:"groups"`
 	Relay   int64            `json:"relay"`
+	// Guard: the boot's kill switch keeps the LAN closed (routing did not
+	// start).
+	Guard bool `json:"guard"`
 }
 
 // Status reports the state of routing.
@@ -558,5 +590,8 @@ func (c *Controller) Status() Status {
 		st.Servers = []tunnels.Status{}
 	}
 	st.Groups = c.groupStatuses()
+	if !st.Running {
+		st.Guard = guardActive()
+	}
 	return st
 }

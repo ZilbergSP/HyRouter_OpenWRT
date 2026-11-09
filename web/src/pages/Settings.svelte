@@ -15,6 +15,7 @@
       lan: s.lan.join(', '),
       dnsByRules: s.dns.byRules,
       dnsTunnel: s.dns.tunnel?.preset ?? '',
+      killSwitch: s.killSwitch ?? false,
     };
   }
 
@@ -33,7 +34,7 @@
         .split(/[\s,;]+/)
         .map((s) => s.trim())
         .filter(Boolean);
-      const r = await api.saveSettings({ lan, dnsByRules: f.dnsByRules, dnsTunnel: f.dnsTunnel });
+      const r = await api.saveSettings({ lan, dnsByRules: f.dnsByRules, dnsTunnel: f.dnsTunnel, killSwitch: f.killSwitch });
       onstate(r.state);
       saved = true;
     } catch (err) {
@@ -74,6 +75,17 @@
       </select>
     </label>
   {/if}
+
+  <h2 class="gap">Блокировка при загрузке</h2>
+  <label class="check field">
+    <input type="checkbox" bind:checked={f.killSwitch} />
+    Не выпускать сеть в интернет, пока HyRouter не запустится
+  </label>
+  <p class="muted small">
+    Пока роутер загружается или HyRouter перезапускается, устройства сети не выходят в интернет, и трафик «через VPN» не
+    уходит напрямую. Сам роутер и этот интерфейс остаются доступны. Блокировка снимается, как только HyRouter применит
+    правила; выключение HyRouter на главной странице снимает её сразу.
+  </p>
 
   {#if error}<div class="notice bad">{error}</div>{/if}
   {#if saved}<div class="notice ok">Настройки сохранены.</div>{/if}

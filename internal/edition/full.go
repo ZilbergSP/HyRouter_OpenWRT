@@ -10,4 +10,4 @@ const (
 )
 
 // Current are the limits of this edition.
-var Current = Limits{DNSCache: 50000, Relay: 8192, VLESS: true, GroupRun: 10}
+var Current = Limits{DNSCache: 50000, Relay: 8192, VLESS: true, GroupRun: 10, SubServers: 3000}

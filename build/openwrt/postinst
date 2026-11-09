@@ -3,6 +3,7 @@
 [ -n "$IPKG_INSTROOT" ] && exit 0
 mkdir -p /etc/hyrouter
 chmod 700 /etc/hyrouter
+/etc/init.d/hyrouter-guard enable
 /etc/init.d/hyrouter enable
 /etc/init.d/hyrouter restart 2>/dev/null
 exit 0

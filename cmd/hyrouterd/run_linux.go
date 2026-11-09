@@ -27,7 +27,7 @@ func run(dir string) int {
 	log.Info("hyrouterd started", "version", version, "edition", edition.Name)
 
 	st := &store.Store{Dir: dir}
-	c := ctl.New(ctl.Options{Store: st, Log: log, Redactor: redactor})
+	c := ctl.New(ctl.Options{Store: st, Log: log, Redactor: redactor, Version: version})
 	port := uint16(store.DefaultWebPort)
 	if err := c.Load(); err != nil {
 		// The table of a run that crashed stays: VPN traffic keeps being
@@ -51,6 +51,10 @@ func run(dir string) int {
 		}
 	}
 
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go c.Run(ctx)
+
 	srv := &web.Server{Ctl: c, Store: st, Journal: journal, Log: log, Version: version, UI: webui.Dist()}
 	go func() {
 		if err := srv.Serve(port); err != nil {
@@ -62,8 +66,9 @@ func run(dir string) int {
 	signal.Notify(sig, syscall.SIGTERM, syscall.SIGINT)
 	<-sig
 	log.Info("hyrouterd stopping")
+	cancel()
 	srv.Close()
-	if err := c.Stop(); err != nil {
+	if err := c.Shutdown(); err != nil {
 		log.Warn("stopped with errors", "err", err)
 		return 1
 	}

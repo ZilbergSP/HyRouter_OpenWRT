@@ -69,6 +69,12 @@
 
 {#if error}<div class="notice bad">{error}</div>{/if}
 {#if status.error}<div class="notice bad">Последняя ошибка: {status.error}</div>{/if}
+{#if status.guard}
+  <div class="notice bad">
+    Устройства сети не выходят в интернет: включена блокировка при загрузке, а HyRouter не запустился. Исправьте ошибку и
+    включите HyRouter — или выключите его, и блокировка снимется.
+  </div>
+{/if}
 
 {#if view.servers.length === 0}
   <div class="card">

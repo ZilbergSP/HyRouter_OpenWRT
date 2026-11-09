@@ -92,6 +92,44 @@ export interface Settings {
   namePort: number;
   dnsPort: number;
   webPort: number;
+  killSwitch?: boolean;
+  stats: boolean;
+  geo: { source?: string; auto: boolean };
+}
+
+export interface SubInfo {
+  summary: string;
+  details: string;
+  level: '' | 'low' | 'out';
+  warning: string;
+  usedPct: number;
+  percent: number;
+}
+
+export interface Sub {
+  id: string;
+  name: string;
+  url: string;
+  enabled: boolean;
+  intervalH: number;
+  lastUpdate?: string;
+  lastAttempt?: string;
+  lastError?: string;
+  count: number;
+  warnings?: string[];
+  ignored?: Record<string, number>;
+  viaVPN?: boolean;
+  supportUrl?: string;
+  info: SubInfo | null;
+  servers: number;
+  missing: number;
+}
+
+export interface MergeStats {
+  added: number;
+  updated: number;
+  removed: number;
+  missingKept: number;
 }
 
 export interface StateView {
@@ -104,6 +142,7 @@ export interface StateView {
   rules: RulesConfig;
   devices: Device[];
   groups: GroupsFile;
+  subs: Sub[];
   strategies: { id: Strategy; name: string }[];
   dnsPresets: { id: string; name: string }[];
 }
@@ -128,6 +167,7 @@ export interface Status {
   servers: ServerStatus[];
   groups: GroupStatus[];
   relay: number;
+  guard: boolean;
 }
 
 export interface Session {

@@ -1,7 +1,26 @@
 // The client of hyrouterd's API. The session is a cookie; every change
 // carries the session's CSRF token.
 
-import type { Device, EditResp, Group, GroupProbe, LogEntry, Neighbour, RulesConfig, Session, StateView, Status } from './types';
+import type {
+  Device,
+  EditResp,
+  Group,
+  GroupProbe,
+  LogEntry,
+  MergeStats,
+  Neighbour,
+  RulesConfig,
+  Session,
+  StateView,
+  Status,
+} from './types';
+
+export interface SubInput {
+  url: string;
+  name: string;
+  intervalH: number;
+  enabled: boolean;
+}
 
 let csrf = '';
 
@@ -68,7 +87,11 @@ export const api = {
   saveRules: (cfg: RulesConfig) => call<EditResp>('PUT', '/api/rules', cfg),
   saveDevices: (devices: Device[]) => call<EditResp>('PUT', '/api/devices', devices),
   neighbours: () => call<Neighbour[]>('GET', '/api/neighbours'),
-  saveSettings: (s: { lan: string[]; dnsByRules: boolean; dnsTunnel: string }) =>
+  addSub: (s: SubInput) => call<EditResp & { id: string; stats: MergeStats }>('POST', '/api/subs', s),
+  editSub: (id: string, s: SubInput) => call<EditResp>('PUT', `/api/subs/${encodeURIComponent(id)}`, s),
+  updateSub: (id: string) => call<EditResp & { stats: MergeStats }>('POST', `/api/subs/${encodeURIComponent(id)}/update`, {}),
+  deleteSub: (id: string) => call<EditResp>('DELETE', `/api/subs/${encodeURIComponent(id)}`),
+  saveSettings: (s: { lan: string[]; dnsByRules: boolean; dnsTunnel: string; killSwitch: boolean }) =>
     call<EditResp>('PUT', '/api/settings', s),
   log: (after: number) => call<LogEntry[]>('GET', `/api/log?after=${after}`),
 };

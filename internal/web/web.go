@@ -54,7 +54,6 @@ type Server struct {
 	// Leases is dnsmasq's DHCP leases file (/tmp/dhcp.leases).
 	Leases string
 
-	mu       sync.Mutex // edits of the settings, one at a time
 	smu      sync.Mutex
 	sessions map[string]session
 	fails    map[netip.Addr]*failures
@@ -96,6 +95,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("PUT /api/groups/{id}", s.authed(s.handleEditGroup))
 	mux.HandleFunc("DELETE /api/groups/{id}", s.authed(s.handleDeleteGroup))
 	mux.HandleFunc("PUT /api/group-probe", s.authed(s.handleGroupProbe))
+	mux.HandleFunc("POST /api/subs", s.authed(s.handleAddSub))
+	mux.HandleFunc("PUT /api/subs/{id}", s.authed(s.handleEditSub))
+	mux.HandleFunc("POST /api/subs/{id}/update", s.authed(s.handleUpdateSub))
+	mux.HandleFunc("DELETE /api/subs/{id}", s.authed(s.handleDeleteSub))
 	mux.HandleFunc("PUT /api/rules", s.authed(s.handleRules))
 	mux.HandleFunc("PUT /api/devices", s.authed(s.handleDevices))
 	mux.HandleFunc("GET /api/neighbours", s.authed(s.handleNeighbours))
@@ -368,24 +371,8 @@ func (s *Server) handleLog(w http.ResponseWriter, r *http.Request) {
 // and put in force, and the new state is the answer. save writes the
 // parts that changed. extra, when set, is added to the answer.
 func (s *Server) edit(w http.ResponseWriter, r *http.Request, change func(*store.State) error, save func(store.State) error, extra map[string]any) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	st := s.Ctl.State().Clone()
-	if err := change(&st); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	if err := ctl.Check(st); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	if err := save(st); err != nil {
-		s.log().Error("web: settings not saved", "err", err)
-		writeError(w, http.StatusInternalServerError, "не удалось сохранить настройки: "+err.Error())
-		return
-	}
-	if err := s.Ctl.Apply(r.Context(), st); err != nil {
-		writeError(w, http.StatusInternalServerError, "сохранено, но не применено: "+err.Error())
+	if err := s.Ctl.Edit(r.Context(), change, save); err != nil {
+		s.editError(w, err)
 		return
 	}
 	out := map[string]any{"state": s.view(s.Ctl.State())}
@@ -393,4 +380,18 @@ func (s *Server) edit(w http.ResponseWriter, r *http.Request, change func(*store
 		out[k] = v
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+// editError answers a failed edit: a refused change is the client's, the
+// rest the router's.
+func (s *Server) editError(w http.ResponseWriter, err error) {
+	var e *ctl.EditError
+	switch {
+	case errors.As(err, &e) && e.Kind == ctl.NotSaved:
+		writeError(w, http.StatusInternalServerError, "не удалось сохранить настройки: "+err.Error())
+	case errors.As(err, &e) && e.Kind == ctl.NotApplied:
+		writeError(w, http.StatusInternalServerError, "сохранено, но не применено: "+err.Error())
+	default:
+		writeError(w, http.StatusBadRequest, err.Error())
+	}
 }

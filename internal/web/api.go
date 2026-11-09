@@ -39,6 +39,7 @@ type stateView struct {
 	Rules      rules.Config       `json:"rules"`
 	Devices    []store.Device     `json:"devices"`
 	Groups     groups.File        `json:"groups"`
+	Subs       []subView          `json:"subs"`
 	Strategies []presetView       `json:"strategies"`
 	Presets    []presetView       `json:"dnsPresets"`
 }
@@ -53,6 +54,7 @@ func (s *Server) view(st store.State) stateView {
 		Rules:    st.Rules,
 		Devices:  st.Devices,
 		Groups:   st.Groups,
+		Subs:     subViews(st),
 		Servers:  make([]hysteria.Profile, 0, len(st.Servers)),
 	}
 	for _, g := range []groups.Strategy{groups.Failover, groups.Latency, groups.RoundRobin, groups.Random, groups.Sticky} {
@@ -84,23 +86,7 @@ func (s *Server) handleRouting(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	st := s.Ctl.State()
-	if req.Enabled {
-		if err := s.Ctl.Start(r.Context()); err != nil {
-			writeError(w, http.StatusInternalServerError, "маршрутизация не запустилась: "+err.Error())
-			return
-		}
-	} else if err := s.Ctl.Stop(); err != nil {
-		s.log().Warn("web: routing stopped with errors", "err", err)
-	}
-	st.Settings.Enabled = req.Enabled
-	if err := s.Store.SaveSettings(st.Settings); err != nil {
-		writeError(w, http.StatusInternalServerError, "не удалось сохранить настройки: "+err.Error())
-		return
-	}
-	if err := s.Ctl.Apply(r.Context(), st); err != nil {
+	if err := s.Ctl.SetRouting(r.Context(), req.Enabled); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -343,6 +329,7 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 		LAN        []string `json:"lan"`
 		DNSByRules bool     `json:"dnsByRules"`
 		DNSTunnel  string   `json:"dnsTunnel"`
+		KillSwitch bool     `json:"killSwitch"`
 	}
 	if err := readJSON(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
@@ -369,6 +356,7 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 		st.Settings.LAN = lan
 		st.Settings.DNS.ByRules = req.DNSByRules
 		st.Settings.DNS.Tunnel = dnspolicy.Upstream{Preset: req.DNSTunnel}
+		st.Settings.KillSwitch = req.KillSwitch
 		return nil
 	}, func(st store.State) error { return s.Store.SaveSettings(st.Settings) }, nil)
 }
