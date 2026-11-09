@@ -11,6 +11,8 @@ set -eu
 
 for t in /out/tree/*/; do
 	t=${t%/}
+	# KeeneticOS packages are .ipk only.
+	[ -f "$t/meta" ] || continue
 	# shellcheck disable=SC1091
 	. "$t/meta"
 	# shellcheck disable=SC2154

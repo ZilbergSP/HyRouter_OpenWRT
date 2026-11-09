@@ -3,11 +3,8 @@
 package ctl
 
 import (
-	"bufio"
 	"cmp"
 	"context"
-	"encoding/binary"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -16,7 +13,6 @@ import (
 	"net"
 	"net/netip"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -27,6 +23,7 @@ import (
 	"github.com/zilbergsp/hyrouter/internal/edition"
 	"github.com/zilbergsp/hyrouter/internal/groups"
 	"github.com/zilbergsp/hyrouter/internal/hysteria"
+	"github.com/zilbergsp/hyrouter/internal/platform"
 	"github.com/zilbergsp/hyrouter/internal/rules"
 	"github.com/zilbergsp/hyrouter/internal/store"
 	"github.com/zilbergsp/hyrouter/internal/zapret"
@@ -44,13 +41,13 @@ import (
 // Paths.
 const (
 	// ZapretDir holds nfqws2, lua/ and blobs/ (the package).
-	ZapretDir = "/usr/share/hyrouter/zapret"
+	ZapretDir = platform.ShareDir + "/zapret"
 	// ZapretLists holds the lists and the made fakes: readable by
 	// everyone, nfqws2 rereads them as daemon.
 	ZapretLists = "/tmp/hyrouter/zapret"
 	// ZapretRulePrefix starts the name of a rule the bypass keeps.
 	ZapretRulePrefix = "Обход DPI: "
-	zapretUser       = "daemon"
+	zapretUser       = platform.ZapretUser
 )
 
 // Tunables (tests).
@@ -120,7 +117,7 @@ type autoPick struct {
 	found bool
 }
 
-// zapretExtra is the bypass's part of the table (nft.Options.Extra).
+// zapretExtra is the bypass's part of the firewall's rules (fwZapret).
 func (c *Controller) zapretExtra() string {
 	if p := c.zap.extra.Load(); p != nil {
 		return *p
@@ -155,69 +152,10 @@ func zapretAvailable() bool {
 	return err == nil
 }
 
-// wanDevices are the interfaces of OpenWrt's wan and wan6 (ubus), else
-// the interface of the default route.
-func wanDevices() []string {
-	var out []string
-	for _, n := range []string{"wan", "wan6"} {
-		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-		b, err := exec.CommandContext(ctx, "ubus", "call", "network.interface."+n, "status").Output()
-		cancel()
-		if err != nil {
-			continue
-		}
-		var s struct {
-			Up       bool   `json:"up"`
-			L3Device string `json:"l3_device"`
-			Device   string `json:"device"`
-		}
-		if json.Unmarshal(b, &s) != nil {
-			continue
-		}
-		d := s.L3Device
-		if d == "" {
-			d = s.Device
-		}
-		if d != "" && !slices.Contains(out, d) {
-			out = append(out, d)
-		}
-	}
-	if len(out) == 0 {
-		if dev, _ := defaultRoute(); dev != "" {
-			out = append(out, dev)
-		}
-	}
-	return out
-}
-
-// defaultRoute reads the IPv4 default route: its interface and gateway.
-func defaultRoute() (string, netip.Addr) {
-	f, err := os.Open("/proc/net/route")
-	if err != nil {
-		return "", netip.Addr{}
-	}
-	defer f.Close()
-	sc := bufio.NewScanner(f)
-	for sc.Scan() {
-		fs := strings.Fields(sc.Text()) // Iface Destination Gateway Flags …
-		if len(fs) < 3 || fs[1] != "00000000" {
-			continue
-		}
-		b, err := hex.DecodeString(fs[2])
-		if err != nil || len(b) != 4 {
-			return fs[0], netip.Addr{}
-		}
-		var a [4]byte
-		binary.LittleEndian.PutUint32(a[:], binary.BigEndian.Uint32(b))
-		return fs[0], netip.AddrFrom4(a)
-	}
-	return "", netip.Addr{}
-}
-
 // zapretNetKey names the network the router is on: the MAC of the
 // provider's gateway (methods are picked per network).
 func (c *Controller) zapretNetKey() (key, name string) {
-	_, gw := defaultRoute()
+	_, gw := platform.DefaultRoute()
 	if !gw.IsValid() {
 		return "", ""
 	}
@@ -298,7 +236,7 @@ func (c *Controller) zapretApplyLocked() {
 		return
 	}
 	key, name := c.zapretNetKey()
-	wan := wanDevices()
+	wan := platform.WAN(context.Background())
 	c.zap.pmu.Lock()
 	c.zap.key, c.zap.net, c.zap.wan = key, name, wan
 	c.zap.pmu.Unlock()
@@ -313,7 +251,7 @@ func (c *Controller) zapretApplyLocked() {
 		return
 	}
 	skip := c.zapretServers()
-	extra, err := zapret.NFT(zapret.NFTConfig{WAN: wan, Queue: zapret.QueueFor(plans), Probes: c.zap.probes.Load(), Skip: skip})
+	extra, err := fwZapret(zapret.NFTConfig{WAN: wan, Queue: zapret.QueueFor(plans), Probes: c.zap.probes.Load(), Skip: skip})
 	if err != nil {
 		stop(err.Error())
 		return
@@ -568,15 +506,6 @@ type ZapretView struct {
 	HealAt      time.Time          `json:"healAt,omitzero"`
 }
 
-// flowOffload reports fw4's flow offloading: the first packets of a
-// forwarded connection may then pass the queue.
-func flowOffload() bool {
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel()
-	b, err := exec.CommandContext(ctx, "uci", "-q", "get", "firewall.@defaults[0].flow_offloading").Output()
-	return err == nil && strings.TrimSpace(string(b)) == "1"
-}
-
 // ZapretInfo is the page.
 func (c *Controller) ZapretInfo() ZapretView {
 	cfg, err := zapretSettings(c.State())
@@ -585,7 +514,7 @@ func (c *Controller) ZapretInfo() ZapretView {
 		WAN: slices.Clone(c.zap.wan), Error: c.zap.err}
 	args, key := c.zap.args, c.zap.key
 	c.zap.pmu.Unlock()
-	v.Status, v.Offload = c.zapretRunner().Status(), flowOffload()
+	v.Status, v.Offload = c.zapretRunner().Status(), platform.Offload(context.Background())
 	if err != nil {
 		v.Error = err.Error()
 	}

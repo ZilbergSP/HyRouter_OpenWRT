@@ -125,7 +125,9 @@
 
 <div class="card">
   <h2>Сейчас в сети</h2>
-  <p class="muted small">Устройства, которым роутер выдал адрес по DHCP.</p>
+  <p class="muted small">
+    {view.platform === 'keenetic' ? 'Устройства, которые знает роутер.' : 'Устройства, которым роутер выдал адрес по DHCP.'}
+  </p>
   {#if neighbours.length === 0}
     <p class="muted">Список пуст или недоступен.</p>
   {:else}

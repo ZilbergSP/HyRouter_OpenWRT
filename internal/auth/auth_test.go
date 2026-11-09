@@ -78,3 +78,31 @@ func TestRoot(t *testing.T) {
 		t.Error("a file without root")
 	}
 }
+
+// Entware: the hash in /opt/etc/shadow, or in /opt/etc/passwd itself.
+func TestRootFrom(t *testing.T) {
+	dir := t.TempDir()
+	shadow := filepath.Join(dir, "shadow")
+	passwd := filepath.Join(dir, "passwd")
+	if err := os.WriteFile(passwd, []byte("root:"+vectors[4].hash+":0:0:root:/opt/root:/opt/bin/sh\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := RootFrom([]string{shadow, passwd}, "password"); !ok || err != nil {
+		t.Errorf("hash in passwd: %v %v", ok, err)
+	}
+	if err := os.WriteFile(passwd, []byte("root:x:0:0:root:/opt/root:/opt/bin/sh\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := RootFrom([]string{shadow, passwd}, "password"); err == nil {
+		t.Error("x in passwd and no shadow: no error")
+	}
+	if err := os.WriteFile(shadow, []byte("root:"+vectors[2].hash+":19000:0:99999:7:::\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := RootFrom([]string{shadow, passwd}, "Hello world!"); !ok || err != nil {
+		t.Errorf("hash in shadow: %v %v", ok, err)
+	}
+	if ok, err := RootFrom([]string{shadow, passwd}, "password"); ok || err != nil {
+		t.Errorf("wrong password: %v %v", ok, err)
+	}
+}

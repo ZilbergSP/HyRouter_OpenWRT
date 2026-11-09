@@ -9,6 +9,7 @@ import (
 	"os"
 
 	"github.com/zilbergsp/hyrouter/internal/edition"
+	"github.com/zilbergsp/hyrouter/internal/platform"
 )
 
 // version is set at build time: -ldflags "-X main.version=1.0.0".
@@ -16,11 +17,16 @@ var version = "dev"
 
 func main() {
 	showVersion := flag.Bool("version", false, "print the version and exit")
-	dir := flag.String("config", "/etc/hyrouter", "the settings folder")
+	dir := flag.String("config", platform.ConfigDir, "the settings folder")
+	clean := flag.Bool("cleanup", false, "remove HyRouter's firewall rules, its kill switch and routing rule, and exit (the package's removal)")
 	flag.Parse()
 	if *showVersion {
-		fmt.Printf("hyrouterd %s (%s)\n", version, edition.Name)
+		fmt.Printf("hyrouterd %s (%s, %s)\n", version, edition.Name, platform.Name)
 		return
+	}
+	platform.Init()
+	if *clean {
+		os.Exit(cleanup())
 	}
 	os.Exit(run(*dir))
 }

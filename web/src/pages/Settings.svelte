@@ -54,7 +54,7 @@
   <h2>Сеть</h2>
   <label class="field">
     <span>Интерфейсы LAN, трафик которых решает HyRouter</span>
-    <input bind:value={f.lan} placeholder="br-lan" />
+    <input bind:value={f.lan} placeholder={view.platform === 'keenetic' ? 'br0' : 'br-lan'} />
   </label>
 
   <h2 class="gap">DNS</h2>
@@ -64,7 +64,7 @@
   </label>
   <p class="muted small">
     Так провайдер не видит, какие сайты из правил «через VPN» открываются, и не может подменить их адреса. Остальные имена
-    разрешает dnsmasq роутера, как раньше.
+    разрешает DNS роутера, как раньше.
   </p>
   {#if f.dnsByRules}
     <label class="field">

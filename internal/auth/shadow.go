@@ -31,12 +31,36 @@ func rootHash(path string) (string, error) {
 	return "", errors.New("auth: no root in " + path)
 }
 
+// RootFrom reports whether password is root's password in the first of
+// paths that holds root's hash: Entware keeps it in /opt/etc/shadow, or
+// in /opt/etc/passwd itself ("x" there points to the shadow file).
+func RootFrom(paths []string, password string) (bool, error) {
+	err := errors.New("auth: root's password is not found")
+	for _, p := range paths {
+		h, e := rootHash(p)
+		if e != nil {
+			err = e
+			continue
+		}
+		if h == "x" {
+			continue
+		}
+		return check(h, password)
+	}
+	return false, err
+}
+
 // Root reports whether password is root's password in the shadow file.
 func Root(shadow, password string) (bool, error) {
 	h, err := rootHash(shadow)
 	if err != nil {
 		return false, err
 	}
+	return check(h, password)
+}
+
+// check verifies password against root's password field h.
+func check(h, password string) (bool, error) {
 	switch {
 	case h == "":
 		return false, ErrNoPassword

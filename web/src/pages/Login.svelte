@@ -1,7 +1,8 @@
 <script lang="ts">
   import { api, errorText } from '../lib/api';
+  import type { Platform } from '../lib/types';
 
-  let { version, onlogin }: { version: string; onlogin: () => void } = $props();
+  let { version, platform, onlogin }: { version: string; platform: Platform; onlogin: () => void } = $props();
 
   let password = $state('');
   let busy = $state(false);
@@ -33,7 +34,7 @@
       </div>
     </div>
     <label class="field">
-      <span>Пароль root роутера</span>
+      <span>{platform === 'keenetic' ? 'Пароль root Entware' : 'Пароль root роутера'}</span>
       <!-- svelte-ignore a11y_autofocus -->
       <input type="password" autocomplete="current-password" bind:value={password} autofocus required />
     </label>

@@ -1,0 +1,8 @@
+#!/bin/sh
+# Stopping removes HyRouter's rules; -cleanup removes the kill switch a
+# stop leaves while routing is on: the LAN goes on as without HyRouter.
+# The settings in /opt/etc/hyrouter stay.
+/opt/etc/init.d/S99hyrouter stop
+/opt/sbin/hyrouterd -cleanup
+rm -rf /tmp/hyrouter/fw
+exit 0

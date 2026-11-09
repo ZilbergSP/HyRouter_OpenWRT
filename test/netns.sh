@@ -12,6 +12,11 @@
 #
 # With HYROUTER_EMBEDDED=1 (HyRouter Lite) the router gets no hysteria
 # binary: its client runs inside hyrouterd, and HYSTERIA is the server only.
+#
+# With HYROUTER_PLATFORM=keenetic (a build with -tags keenetic) the router
+# is a KeeneticOS one: iptables and ipset (legacy, as Entware's) instead of
+# nftables, the firmware's DNS on the LAN address, and the firmware's
+# rebuilds of its tables, which the netfilter.d hook and hyrouterd undo.
 set -euo pipefail
 
 HYROUTERD=$1
@@ -20,14 +25,38 @@ HYVERSION=$3
 WAN=198.51.100.1
 W=$(mktemp -d)
 PIDS=()
+HERE=$(cd "$(dirname "$0")" && pwd)
+KEENETIC=""
+CORES=/usr/share/hyrouter/bin
+MARK=0x8000000
+if [ "${HYROUTER_PLATFORM:-}" = keenetic ]; then
+	KEENETIC=1
+	CORES=/opt/share/hyrouter/bin
+	MARK=0x80000000
+	# Entware's iptables is the legacy one.
+	mkdir -p "$W/bin"
+	for t in iptables ip6tables; do
+		for s in "" -save -restore; do
+			ln -s "$(command -v "$t-legacy$s")" "$W/bin/$t$s"
+		done
+	done
+	export PATH="$W/bin:$PATH"
+fi
 
 dump() {
 	echo "=== hyrouterd"
 	cat "$W/hyrouterd.log" 2>/dev/null || true
 	echo "=== hysteria server"
 	tail -n 30 "$W/hysteria-server.log" 2>/dev/null || true
-	echo "=== nftables of the router"
-	ip netns exec rtr nft list ruleset 2>/dev/null | head -n 200 || true
+	if [ -n "$KEENETIC" ]; then
+		echo "=== iptables of the router"
+		ip netns exec rtr iptables-save 2>/dev/null | head -n 200 || true
+		echo "=== ipsets"
+		ip netns exec rtr ipset list -n 2>/dev/null || true
+	else
+		echo "=== nftables of the router"
+		ip netns exec rtr nft list ruleset 2>/dev/null | head -n 200 || true
+	fi
 	echo "=== ip rule"
 	ip netns exec rtr ip rule 2>/dev/null || true
 }
@@ -50,6 +79,10 @@ fail() {
 pass() { echo "ok: $*"; }
 
 modprobe -a nft_tproxy nf_tproxy_ipv4 nf_tproxy_ipv6 nft_socket nft_fib_inet nft_reject_inet nft_redir nft_nat 2>/dev/null || true
+if [ -n "$KEENETIC" ]; then
+	modprobe -a xt_TPROXY ip_set ip_set_hash_ip ip_set_hash_net xt_set xt_connmark xt_mark xt_mac xt_multiport xt_addrtype xt_conntrack \
+		iptable_mangle iptable_nat iptable_filter ip6table_mangle ip6table_nat ip6table_filter xt_REDIRECT ipt_REJECT ip6t_REJECT 2>/dev/null || true
+fi
 
 # --- the network ---------------------------------------------------------
 for ns in dev dev2 rtr net; do
@@ -146,14 +179,20 @@ start_server() {
 start_server
 
 # --- the router ----------------------------------------------------------
+# dnsmasq is OpenWrt's DNS on loopback; KeeneticOS's DNS answers on the
+# LAN address too.
+listen=(--listen-address=127.0.0.1)
+if [ -n "$KEENETIC" ]; then
+	listen+=(--listen-address=192.168.50.1)
+fi
 ip netns exec rtr dnsmasq --keep-in-foreground --no-resolv --no-hosts --bind-interfaces \
-	--listen-address=127.0.0.1 --port=53 --pid-file="$W/dnsmasq.pid" \
+	"${listen[@]}" --port=53 --pid-file="$W/dnsmasq.pid" \
 	--address=/vpn.test/203.0.113.30 --address=/a.test/203.0.113.40 --address=/b.test/203.0.113.40 &
 PIDS+=($!)
-mkdir -p "$W/etc" /usr/share/hyrouter/bin
-rm -f /usr/share/hyrouter/bin/hysteria-*
+mkdir -p "$W/etc" "$CORES"
+rm -f "$CORES"/hysteria-*
 if [ "${HYROUTER_EMBEDDED:-0}" != 1 ]; then
-	install -m 0755 "$HYSTERIA" "/usr/share/hyrouter/bin/hysteria-${HYVERSION//\//-}"
+	install -m 0755 "$HYSTERIA" "$CORES/hysteria-${HYVERSION//\//-}"
 fi
 cat >"$W/etc/settings.json" <<'EOF'
 {"enabled": true, "lan": ["br-lan"], "main": "srv-ci", "dns": {"byRules": false}}
@@ -243,25 +282,63 @@ direct dev http://203.0.113.10/
 
 # It comes back (procd) and routes again.
 start_hyrouterd
-up=""
-for _ in $(seq 1 40); do
-	got=$(seen dev http://203.0.113.20/)
-	if [ "$got" != ERR ] && [ "$got" != "$WAN" ]; then
-		up=1
-		break
-	fi
-	sleep 1
-done
-[ -n "$up" ] || fail "routing did not come back after a restart"
+wait_tunnel() {
+	local i
+	for i in $(seq 1 "$1"); do
+		got=$(seen dev http://203.0.113.20/)
+		if [ "$got" != ERR ] && [ "$got" != "$WAN" ]; then
+			return 0
+		fi
+		[ "$i" = "$1" ] || sleep 1
+	done
+	return 1
+}
+wait_tunnel 40 || fail "routing did not come back after a restart"
 pass "routing back after a crash"
+
+if [ -n "$KEENETIC" ]; then
+	# Every table of both families loaded: no fallback warnings.
+	if grep -E "IPv6 (DNS|connections)|IPv6 устройств|правила IPv6" "$W/hyrouterd.log"; then
+		fail "the IPv6 rules did not load"
+	fi
+	# The firmware rebuilds the mangle table and drops HyRouter's chains;
+	# its netfilter.d hook loads them again from hyrouterd's files.
+	ip netns exec rtr iptables -t mangle -F
+	ip netns exec rtr iptables -t mangle -X
+	ip netns exec rtr env type=iptables table=mangle sh "$HERE/../build/keenetic/50-hyrouter.sh"
+	tunnel dev http://203.0.113.20/
+	direct dev http://203.0.113.10/
+	pass "the netfilter.d hook put the rules back"
+
+	# A rebuild without the hook (it failed on some firmware): hyrouterd
+	# puts them back itself.
+	ip netns exec rtr iptables -t mangle -F
+	ip netns exec rtr iptables -t mangle -X
+	wait_tunnel 40 || fail "hyrouterd did not put the rules back"
+	pass "hyrouterd put the rules back"
+
+	# The firmware takes the routing rule: VPN traffic is refused, never
+	# sent direct, until hyrouterd adds it again.
+	ip netns exec rtr ip rule del fwmark "$MARK/$MARK" lookup 7701
+	refused dev http://203.0.113.20/
+	wait_tunnel 40 || fail "hyrouterd did not add the routing rule again"
+	pass "the routing rule back"
+fi
 
 # A stop removes everything: the LAN goes as without HyRouter.
 kill -TERM "$HYR"
 wait "$HYR" 2>/dev/null || true
-if ip netns exec rtr nft list table inet hyrouter >/dev/null 2>&1; then
+if [ -n "$KEENETIC" ]; then
+	if ip netns exec rtr iptables-save | grep -q HYR_; then
+		fail "HyRouter's chains are still there after a stop"
+	fi
+	if ip netns exec rtr ipset list -n | grep -q '^hyr_'; then
+		fail "HyRouter's ipsets are still there after a stop"
+	fi
+elif ip netns exec rtr nft list table inet hyrouter >/dev/null 2>&1; then
 	fail "the table is still there after a stop"
 fi
-if ip netns exec rtr ip rule | grep -q 0x8000000; then
+if ip netns exec rtr ip rule | grep -q "$MARK"; then
 	fail "the policy routing rule is still there after a stop"
 fi
 direct dev http://203.0.113.20/

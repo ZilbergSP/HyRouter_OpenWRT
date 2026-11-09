@@ -78,6 +78,50 @@ func (p PolicyRouting) Remove() error {
 	return errors.Join(errs...)
 }
 
+// Present reports whether the IPv4 rule is there: the firmware of
+// KeeneticOS may rebuild the rules when a connection changes.
+func (p PolicyRouting) Present() (bool, error) {
+	c, err := netlink.Dial(unix.NETLINK_ROUTE, nil)
+	if err != nil {
+		return false, fmt.Errorf("netlink: %w", err)
+	}
+	defer c.Close()
+	hdr := []byte{unix.AF_INET, 0, 0, 0, unix.RT_TABLE_UNSPEC, 0, 0, 0, 0, 0, 0, 0}
+	msgs, err := c.Execute(netlink.Message{
+		Header: netlink.Header{Type: unix.RTM_GETRULE, Flags: netlink.Request | netlink.Dump},
+		Data:   hdr,
+	})
+	if err != nil {
+		return false, err
+	}
+	for _, m := range msgs {
+		if len(m.Data) < len(hdr) {
+			continue
+		}
+		ad, err := netlink.NewAttributeDecoder(m.Data[len(hdr):])
+		if err != nil {
+			continue
+		}
+		var prio, mark, mask, table uint32
+		for ad.Next() {
+			switch ad.Type() {
+			case unix.FRA_PRIORITY:
+				prio = ad.Uint32()
+			case unix.FRA_FWMARK:
+				mark = ad.Uint32()
+			case unix.FRA_FWMASK:
+				mask = ad.Uint32()
+			case unix.FRA_TABLE:
+				table = ad.Uint32()
+			}
+		}
+		if prio == p.Priority && mark == p.Mark && mask == p.Mask && table == p.Table {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 // removeRules deletes this rule of a family until none is left: a run
 // that crashed may have left one.
 func (p PolicyRouting) removeRules(c *netlink.Conn, fam uint8) {

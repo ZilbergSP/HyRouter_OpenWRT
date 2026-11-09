@@ -3,19 +3,18 @@
 package ctl
 
 import (
-	"bufio"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"os"
 	"slices"
 	"strings"
 	"time"
 
 	"github.com/zilbergsp/hyrouter/internal/edition"
 	"github.com/zilbergsp/hyrouter/internal/hysteria"
+	"github.com/zilbergsp/hyrouter/internal/platform"
 	"github.com/zilbergsp/hyrouter/internal/store"
 	"github.com/zilbergsp/hyrouter/internal/subs"
 )
@@ -59,7 +58,10 @@ func (c *Controller) fetcher() *subs.Fetcher {
 	return &subs.Fetcher{
 		UserAgent: "HyRouter/" + c.version,
 		Device: func(host string) subs.DeviceInfo {
-			return subs.DeviceInfo{HWID: subs.DeviceID(c.State().Settings.DeviceID, host), OS: "OpenWrt", OSVersion: osRelease(), Model: boardModel()}
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			name, version, model := platform.System(ctx)
+			return subs.DeviceInfo{HWID: subs.DeviceID(c.State().Settings.DeviceID, host), OS: name, OSVersion: version, Model: model}
 		},
 		Tunnel: func() subs.Dialer {
 			id := c.memberFor(c.State().Settings.Main)
@@ -73,31 +75,6 @@ func (c *Controller) fetcher() *subs.Fetcher {
 			return ep
 		},
 	}
-}
-
-// osRelease is OpenWrt's version (DISTRIB_RELEASE).
-func osRelease() string {
-	f, err := os.Open("/etc/openwrt_release")
-	if err != nil {
-		return ""
-	}
-	defer f.Close()
-	sc := bufio.NewScanner(f)
-	for sc.Scan() {
-		if v, ok := strings.CutPrefix(sc.Text(), "DISTRIB_RELEASE="); ok {
-			return strings.Trim(v, `'"`)
-		}
-	}
-	return ""
-}
-
-// boardModel is the router's model (/tmp/sysinfo/model).
-func boardModel() string {
-	b, err := os.ReadFile("/tmp/sysinfo/model")
-	if err != nil {
-		return ""
-	}
-	return strings.TrimSpace(string(b))
 }
 
 func randomID(n int) string {

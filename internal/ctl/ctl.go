@@ -1,11 +1,12 @@
 //go:build linux
 
 // Package ctl is HyRouter's controller: it turns the settings in
-// /etc/hyrouter into routing (docs/ARCHITECTURE.md) and back. Start
-// readies the cores, the relay, the DNS and the policy routing and loads
-// the nftables table last, so the first connection it sends anywhere
-// finds everything in place; Stop removes the table first, so the LAN
-// goes on as without HyRouter.
+// /etc/hyrouter (/opt/etc/hyrouter on KeeneticOS) into routing
+// (docs/ARCHITECTURE.md) and back. Start readies the cores, the relay,
+// the DNS and the policy routing and loads the firewall's rules last (the
+// nftables table, or the iptables chains: fw_nft.go, fw_ipt.go), so the
+// first connection they send anywhere finds everything in place; Stop
+// removes the rules first, so the LAN goes on as without HyRouter.
 package ctl
 
 import (
@@ -32,7 +33,7 @@ import (
 	"github.com/zilbergsp/hyrouter/internal/hysteria"
 	"github.com/zilbergsp/hyrouter/internal/kernel"
 	"github.com/zilbergsp/hyrouter/internal/logx"
-	"github.com/zilbergsp/hyrouter/internal/nft"
+	"github.com/zilbergsp/hyrouter/internal/platform"
 	"github.com/zilbergsp/hyrouter/internal/relay"
 	"github.com/zilbergsp/hyrouter/internal/rules"
 	"github.com/zilbergsp/hyrouter/internal/socks5"
@@ -45,11 +46,10 @@ import (
 // Paths on the router.
 const (
 	RunDir   = "/tmp/hyrouter/run"
-	CoresDir = "/usr/share/hyrouter/bin"
+	CoresDir = platform.ShareDir + "/bin"
 	// SpareCoresDir keeps the cores in RAM when the flash has too little
 	// room (HyRouter Lite).
 	SpareCoresDir = "/tmp/hyrouter/bin"
-	dnsmasq       = "127.0.0.1:53"
 )
 
 // Options make a controller.
@@ -93,7 +93,7 @@ type Controller struct {
 	running bool
 	relay   *relay.Relay
 	dns     *dnsd.Server
-	sets    *nft.Sets
+	sets    fwSets
 	route   kernel.PolicyRouting
 	lastErr string
 	since   time.Time
@@ -102,6 +102,8 @@ type Controller struct {
 	// reader of the kernel's connections.
 	probeStop context.CancelFunc
 	ctStop    context.CancelFunc
+	// fwStop ends the watch of the firewall's rules (fwWatch).
+	fwStop context.CancelFunc
 
 	// editMu: one edit of the settings at a time (Edit).
 	editMu sync.Mutex
@@ -146,7 +148,7 @@ func New(o Options) *Controller {
 	c.stats = stats.New(c.log)
 	c.stats.Names = c.statsName
 	c.stats.Configure(statFiles{dir: filepath.Join(o.Store.Dir, "stats")})
-	c.route = kernel.PolicyRouting{Mark: nft.MarkTProxy, Mask: nft.MarkTProxy, Table: nft.RouteTable, Priority: nft.RulePriority}
+	c.route = fwRoute
 	c.groups = groups.NewRuntime(c.log)
 	c.tunnels = &tunnels.Manager{New: c.newRunner, Log: c.log, OnHealth: c.noteHealth, OnDial: c.groups.NoteDial}
 	c.resolver = &dnsproxy.Resolver{TunnelDial: c.tunnelDial, Log: c.log}
@@ -266,7 +268,7 @@ func (c *Controller) State() store.State {
 // compiled is what a state makes.
 type compiled struct {
 	set      *rules.Set
-	script   string
+	script   fwScript
 	policy   *dnspolicy.Policy
 	hasSets  map[int]bool
 	profiles []hysteria.Profile
@@ -279,7 +281,7 @@ type compiled struct {
 	probe    *groups.Probe
 }
 
-// compile turns a state into the rule set, the nftables script, the DNS
+// compile turns a state into the rule set, the firewall's rules, the DNS
 // policy and the servers to run. Issues are what matches nothing for now
 // (a missing server or group, a device not in the table, VLESS in Lite).
 // run gives the members of a group that run (nil = its first ones);
@@ -375,8 +377,7 @@ func compile(st store.State, run func(groups.Group) []string, extra string) (*co
 	if out.policy, err = dnspolicy.Compile(st.Settings.DNS, dnspolicy.Names{Servers: servers}); err != nil {
 		return nil, fmt.Errorf("DNS: %w", err)
 	}
-	s := st.Settings
-	out.script, err = nft.Compile(plan, def, nft.Options{LAN: s.LAN, TunnelPort: s.TunnelPort, NamePort: s.NamePort, DNSPort: s.DNSPort, Extra: extra})
+	out.script, err = fwCompile(plan, def, st.Settings, extra)
 	if err != nil {
 		return nil, err
 	}
@@ -430,11 +431,22 @@ func (c *Controller) reloadTable(ctx context.Context) error {
 		return err
 	}
 	c.install(cp)
-	if err := nft.Load(ctx, cp.script); err != nil {
+	if err := c.load(ctx, cp); err != nil {
 		return err
 	}
 	c.dns.Refill()
 	return nil
+}
+
+// load puts the compiled rules in force; what the firewall could not do
+// in full joins the issues. c.mu is held.
+func (c *Controller) load(ctx context.Context, cp *compiled) error {
+	warnings, err := fwLoad(ctx, cp.script, c.st.Settings.LAN)
+	for _, w := range warnings {
+		c.log.Warn(w)
+	}
+	c.issues = append(c.issues, warnings...)
+	return err
 }
 
 // Running reports whether HyRouter routes the LAN.
@@ -482,7 +494,7 @@ func (c *Controller) startLocked(ctx context.Context) error {
 	}
 	c.install(cp)
 	s := c.st.Settings
-	if c.sets, err = nft.OpenSets(); err != nil {
+	if c.sets, err = fwOpenSets(); err != nil {
 		return err
 	}
 	c.relay, err = relay.Start(relay.Config{
@@ -502,7 +514,7 @@ func (c *Controller) startLocked(ctx context.Context) error {
 	}
 	c.dns, err = dnsd.Start(dnsd.Config{
 		Port:     s.DNSPort,
-		Upstream: dnsmasq,
+		Upstream: platform.DNSUpstream(s.LAN),
 		Policy:   c.policy.Load,
 		Rules:    c.rules.Load,
 		HasSets:  c.hasSet,
@@ -518,11 +530,11 @@ func (c *Controller) startLocked(ctx context.Context) error {
 	if err := c.route.Install(); err != nil {
 		return fmt.Errorf("маршрутизация: %w", err)
 	}
-	if err := nft.Load(ctx, cp.script); err != nil {
+	if err := c.load(ctx, cp); err != nil {
 		return err
 	}
-	// HyRouter's table decides the LAN now: the boot's kill switch goes.
-	if err := nft.RemoveGuard(ctx); err != nil {
+	// HyRouter's rules decide the LAN now: the boot's kill switch goes.
+	if err := fwRemoveGuard(ctx); err != nil {
 		c.log.Warn("kill switch: not removed", "err", err)
 	}
 	c.dns.Refill()
@@ -530,6 +542,9 @@ func (c *Controller) startLocked(ctx context.Context) error {
 	ctCtx, ctCancel := context.WithCancel(context.Background())
 	c.ctStop = ctCancel
 	go c.runConntrack(ctCtx)
+	fwCtx, fwCancel := context.WithCancel(context.Background())
+	c.fwStop = fwCancel
+	go c.fwWatch(fwCtx)
 	for _, i := range cp.issues {
 		c.log.Warn(i)
 	}
@@ -543,7 +558,7 @@ func (c *Controller) hasSet(pos int) bool {
 	return false
 }
 
-// Stop ends routing: the table goes first, then the rest.
+// Stop ends routing: the rules go first, then the rest.
 func (c *Controller) Stop() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -562,7 +577,11 @@ func (c *Controller) stopLocked() error {
 		c.ctStop()
 		c.ctStop = nil
 	}
-	if err := nft.Remove(ctx); err != nil {
+	if c.fwStop != nil {
+		c.fwStop()
+		c.fwStop = nil
+	}
+	if err := fwRemove(ctx); err != nil {
 		errs = append(errs, err)
 	}
 	if err := c.route.Remove(); err != nil {
@@ -624,7 +643,7 @@ func (c *Controller) Apply(ctx context.Context, st store.State) error {
 		}
 	}
 	c.install(cp)
-	if err := nft.Load(ctx, cp.script); err != nil {
+	if err := c.load(ctx, cp); err != nil {
 		return err
 	}
 	c.dns.Refill()
@@ -651,12 +670,14 @@ type Status struct {
 	// Guard: the boot's kill switch keeps the LAN closed (routing did not
 	// start).
 	Guard bool `json:"guard"`
+	// Platform is the router's system: "openwrt" or "keenetic".
+	Platform string `json:"platform"`
 }
 
 // Status reports the state of routing.
 func (c *Controller) Status() Status {
 	c.mu.Lock()
-	st := Status{Edition: edition.Name, Running: c.running, Since: c.since, Error: c.lastErr, Issues: slices.Clone(c.issues)}
+	st := Status{Edition: edition.Name, Platform: platform.ID, Running: c.running, Since: c.since, Error: c.lastErr, Issues: slices.Clone(c.issues)}
 	if c.relay != nil {
 		st.Relay = c.relay.Active()
 	}

@@ -19,6 +19,7 @@ import (
 	"github.com/zilbergsp/hyrouter/internal/dnspolicy"
 	"github.com/zilbergsp/hyrouter/internal/groups"
 	"github.com/zilbergsp/hyrouter/internal/hysteria"
+	"github.com/zilbergsp/hyrouter/internal/platform"
 	"github.com/zilbergsp/hyrouter/internal/rules"
 )
 
@@ -137,7 +138,7 @@ func (st State) Clone() State {
 func Defaults() State {
 	return State{
 		Settings: Settings{
-			LAN:        []string{"br-lan"},
+			LAN:        []string{platform.DefaultLAN},
 			DNS:        dnspolicy.Config{ByRules: true},
 			TunnelPort: DefaultTunnelPort,
 			NamePort:   DefaultNamePort,
@@ -235,7 +236,7 @@ func fillPorts(s *Settings) {
 		}
 	}
 	if len(s.LAN) == 0 {
-		s.LAN = []string{"br-lan"}
+		s.LAN = []string{platform.DefaultLAN}
 	}
 }
 

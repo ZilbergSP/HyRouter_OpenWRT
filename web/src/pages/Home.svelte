@@ -44,7 +44,7 @@
 
 <div class="notice">
   Бета-версия: проверена в CI, но не на настоящих роутерах. Держите доступ к роутеру по SSH, чтобы выключить HyRouter
-  командой <code>/etc/init.d/hyrouter stop</code>, если сеть перестанет работать.
+  командой <code>{view.stopCommand}</code>, если сеть перестанет работать.
 </div>
 
 <div class="card hero">

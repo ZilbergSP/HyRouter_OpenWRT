@@ -1,0 +1,90 @@
+#!/bin/sh
+# HyRouter on KeeneticOS (Entware): routes the LAN through Hysteria 2 and
+# VLESS servers by rules. The settings and the web interface: hyrouterd
+# (port 8088 of the router). Entware starts it at boot.
+#
+#   /opt/etc/init.d/S99hyrouter start|stop|restart|status
+
+PATH=/opt/sbin:/opt/bin:/opt/usr/sbin:/opt/usr/bin:/usr/sbin:/usr/bin:/sbin:/bin
+export PATH
+DAEMON=/opt/sbin/hyrouterd
+PIDFILE=/opt/var/run/hyrouter.pid
+LOG=/tmp/hyrouter/hyrouterd.log
+
+running() {
+	[ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null
+}
+
+# supervise runs hyrouterd and starts it again after a crash: until it is
+# back, the rules it left refuse VPN traffic instead of sending it direct.
+# A TERM stops hyrouterd and the loop.
+supervise() {
+	child=""
+	stopping=""
+	trap 'stopping=1; [ -n "$child" ] && kill -TERM "$child" 2>/dev/null' TERM INT
+	while [ -z "$stopping" ]; do
+		if [ "$(wc -c <"$LOG" 2>/dev/null || echo 0)" -gt 1048576 ]; then
+			: >"$LOG"
+		fi
+		"$DAEMON" -config /opt/etc/hyrouter >>"$LOG" 2>&1 &
+		child=$!
+		wait "$child"
+		# A trap ends wait early: wait for hyrouterd itself.
+		while kill -0 "$child" 2>/dev/null; do
+			wait "$child"
+		done
+		child=""
+		[ -n "$stopping" ] && break
+		sleep 5
+	done
+}
+
+start() {
+	if running; then
+		echo "HyRouter is running"
+		return 0
+	fi
+	mkdir -p /tmp/hyrouter /opt/var/run
+	ulimit -n 65535 2>/dev/null
+	supervise </dev/null >/dev/null 2>&1 &
+	echo $! >"$PIDFILE"
+	echo "HyRouter started"
+}
+
+stop() {
+	if ! running; then
+		rm -f "$PIDFILE"
+		echo "HyRouter is not running"
+		return 0
+	fi
+	pid=$(cat "$PIDFILE")
+	kill -TERM "$pid"
+	i=0
+	while kill -0 "$pid" 2>/dev/null && [ "$i" -lt 30 ]; do
+		sleep 1
+		i=$((i + 1))
+	done
+	rm -f "$PIDFILE"
+	echo "HyRouter stopped"
+}
+
+case "$1" in
+start) start ;;
+stop) stop ;;
+restart)
+	stop
+	start
+	;;
+status)
+	if running; then
+		echo "HyRouter is running"
+	else
+		echo "HyRouter is stopped"
+		exit 1
+	fi
+	;;
+*)
+	echo "usage: $0 start|stop|restart|status"
+	exit 1
+	;;
+esac

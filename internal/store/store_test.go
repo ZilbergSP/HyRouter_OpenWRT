@@ -8,6 +8,7 @@ import (
 
 	"github.com/zilbergsp/hyrouter/internal/groups"
 	"github.com/zilbergsp/hyrouter/internal/hysteria"
+	"github.com/zilbergsp/hyrouter/internal/platform"
 	"github.com/zilbergsp/hyrouter/internal/rules"
 )
 
@@ -17,7 +18,7 @@ func TestDefaultsAndRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if st.Settings.Enabled || st.Settings.LAN[0] != "br-lan" || !st.Settings.DNS.ByRules || st.Settings.WebPort != DefaultWebPort || st.Rules.DefaultAction != rules.Direct {
+	if st.Settings.Enabled || st.Settings.LAN[0] != platform.DefaultLAN || !st.Settings.DNS.ByRules || st.Settings.WebPort != DefaultWebPort || st.Rules.DefaultAction != rules.Direct {
 		t.Fatalf("defaults: %+v", st)
 	}
 	st.Settings.Enabled, st.Settings.Main = true, "srv-1"

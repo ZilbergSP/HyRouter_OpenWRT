@@ -40,6 +40,14 @@ jobs:
         run: |
           go vet -tags lite ./...
           go test -tags lite ./internal/edition/ ./internal/nft/ ./internal/rules/
+      # KeeneticOS: the same code with iptables and Entware's paths.
+      - name: KeeneticOS (vet and tests with -tags keenetic)
+        if: ${{ !cancelled() }}
+        run: |
+          go vet -tags keenetic ./...
+          go vet -tags keenetic,lite ./...
+          go test -race -tags keenetic ./internal/platform/ ./internal/ipt/ ./internal/zapret/ ./internal/ctl/ ./internal/store/ ./internal/auth/
+          go test -tags keenetic,lite ./internal/edition/ ./internal/platform/
       - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         if: ${{ !cancelled() }}
         with:
@@ -100,7 +108,30 @@ jobs:
             echo "== $f"
             sudo nft -c -f "$f"
           done
-      - name: hyrouterd for the routers (HyRouter arm64, amd64; Lite mipsle, armv7)
+      # KeeneticOS: every rule set of the routing, the boot guard and the
+      # DPI bypass through iptables-restore --test (legacy iptables, as
+      # Entware's), with their ipsets made first.
+      - name: iptables takes every rule set (KeeneticOS)
+        if: ${{ !cancelled() }}
+        run: |
+          export HYROUTER_IPT_DIR="$RUNNER_TEMP/ipt"
+          go test -run IPTFiles -v ./internal/ipt ./internal/zapret
+          sudo apt-get install -y -qq ipset >/dev/null
+          sudo modprobe -a ip_set ip_set_hash_ip ip_set_hash_net xt_set iptable_mangle ip6table_mangle iptable_nat ip6table_nat iptable_filter ip6table_filter || true
+          for s in "$HYROUTER_IPT_DIR"/*.ipset; do
+            echo "== $s"
+            sudo ipset -exist restore <"$s"
+          done
+          for f in "$HYROUTER_IPT_DIR"/*.rules; do
+            case "$f" in
+            *-6-*) tool=ip6tables-legacy-restore ;;
+            *) tool=iptables-legacy-restore ;;
+            esac
+            echo "== $f"
+            sudo "$tool" --test --noflush <"$f"
+          done
+          sudo ipset list -n | grep '^hyr_' | xargs -rn1 sudo ipset destroy
+      - name: hyrouterd for the routers (HyRouter arm64, amd64; Lite mipsle, armv7; KeeneticOS arm64, mipsle, mips)
         if: ${{ !cancelled() }}
         run: |
           export CGO_ENABLED=0 GOOS=linux
@@ -109,6 +140,9 @@ jobs:
           done
           GOARCH=mipsle GOMIPS=softfloat go build -tags lite -trimpath -ldflags '-s -w' -o "$RUNNER_TEMP/hyrouterd-lite-mipsle" ./cmd/hyrouterd
           GOARCH=arm GOARM=7 go build -tags lite -trimpath -ldflags '-s -w' -o "$RUNNER_TEMP/hyrouterd-lite-armv7" ./cmd/hyrouterd
+          GOARCH=arm64 go build -tags keenetic -trimpath -ldflags '-s -w' -o "$RUNNER_TEMP/hyrouterd-keenetic-arm64" ./cmd/hyrouterd
+          GOARCH=mipsle GOMIPS=softfloat go build -tags keenetic,lite -trimpath -ldflags '-s -w' -o "$RUNNER_TEMP/hyrouterd-keenetic-lite-mipsle" ./cmd/hyrouterd
+          GOARCH=mips GOMIPS=softfloat go build -tags keenetic,lite -trimpath -ldflags '-s -w' -o "$RUNNER_TEMP/hyrouterd-keenetic-lite-mips" ./cmd/hyrouterd
           ls -l "$RUNNER_TEMP"/hyrouterd-*
   # The routing itself, in network namespaces with a real Hysteria 2
   # server (test/netns.sh). Root only: here, never on a maintainer's PC.
@@ -121,7 +155,7 @@ jobs:
           go-version: '1.27.x'
           check-latest: true
       - name: shellcheck
-        run: shellcheck test/netns.sh
+        run: shellcheck test/netns.sh build/keenetic/50-hyrouter.sh
       - name: hyrouterd and the pinned Hysteria
         run: |
           CGO_ENABLED=0 go build -o "$RUNNER_TEMP/hyrouterd" ./cmd/hyrouterd
@@ -138,6 +172,15 @@ jobs:
         run: |
           CGO_ENABLED=0 go build -tags lite -o "$RUNNER_TEMP/hyrouterd-lite" ./cmd/hyrouterd
           sudo HYROUTER_EMBEDDED=1 bash test/netns.sh "$RUNNER_TEMP/hyrouterd-lite" "$RUNNER_TEMP/hysteria" "$(jq -r .hysteria.version build/deps.json)"
+      # KeeneticOS: iptables and ipset (legacy, as Entware's) instead of
+      # nftables, the firmware rebuilding its tables, HyRouter Lite as most
+      # Keenetic routers get it.
+      - name: Routing in network namespaces, KeeneticOS (iptables)
+        if: ${{ !cancelled() }}
+        run: |
+          CGO_ENABLED=0 go build -tags keenetic,lite -o "$RUNNER_TEMP/hyrouterd-keenetic" ./cmd/hyrouterd
+          sudo apt-get install -y -qq ipset >/dev/null
+          sudo HYROUTER_EMBEDDED=1 HYROUTER_PLATFORM=keenetic bash test/netns.sh "$RUNNER_TEMP/hyrouterd-keenetic" "$RUNNER_TEMP/hysteria" "$(jq -r .hysteria.version build/deps.json)"
   # The packages of both editions, installed on OpenWrt 24.10 (opkg) and
   # 25.12 (apk) in the official rootfs images.
   packages:
@@ -149,10 +192,10 @@ jobs:
           go-version: '1.27.x'
           check-latest: true
       - name: shellcheck
-        run: shellcheck build/package.sh build/apk.sh build/openwrt/postinst build/openwrt/prerm build/openwrt/hyrouter-guard.init
+        run: shellcheck build/package.sh build/apk.sh build/openwrt/postinst build/openwrt/prerm build/openwrt/hyrouter-guard.init build/keenetic/S99hyrouter build/keenetic/postinst build/keenetic/prerm
       - name: Packages (.ipk and .apk)
         run: |
-          bash build/package.sh 0.0.0 "$RUNNER_TEMP/out"
+          HYROUTER_TEST_ENTWARE=1 bash build/package.sh 0.0.0 "$RUNNER_TEMP/out"
           docker run --rm -v "$RUNNER_TEMP/out:/out" alpine:3.24.4 /bin/sh /out/apk.sh
       - name: Install on OpenWrt 24.10 (opkg)
         run: |
@@ -190,3 +233,35 @@ jobs:
             sh -n /etc/init.d/hyrouter-guard
             apk del hyrouter
             test ! -e /usr/bin/hyrouterd'
+      # KeeneticOS: Entware for x64 (the same packages as the routers' ones,
+      # built for x64-3.2) in a Debian container. The service starts and
+      # answers; the firmware itself is not there.
+      - name: Install in Entware (KeeneticOS package)
+        run: |
+          docker run --rm -v "$RUNNER_TEMP/out/packages:/p:ro" debian:bookworm-slim /bin/sh -c '
+            set -e
+            apt-get update -qq >/dev/null
+            apt-get install -y -qq wget ca-certificates >/dev/null
+            wget -qO- http://bin.entware.net/x64-k3.2/installer/generic.sh | sh >/dev/null
+            export PATH=/opt/bin:/opt/sbin:$PATH
+            opkg install /p/hyrouter-keenetic_0.0.0-1_x64-3.2.ipk
+            hyrouterd -version | grep -q KeeneticOS
+            sh -n /opt/etc/init.d/S99hyrouter
+            sh -n /opt/etc/ndm/netfilter.d/50-hyrouter.sh
+            test -x /opt/share/hyrouter/zapret/nfqws2
+            test -f /opt/share/hyrouter/zapret/lua/zapret-lib.lua
+            test -x /opt/sbin/iptables-restore
+            test -x /opt/sbin/ipset
+            test -s /opt/etc/ssl/certs/ca-certificates.crt
+            test -d /opt/etc/hyrouter
+            # postinst started the service: its interface answers.
+            ok=""
+            for i in $(seq 1 20); do
+              if wget -qO- http://127.0.0.1:8088/api/session | grep -q keenetic; then ok=1; break; fi
+              sleep 1
+            done
+            if [ -z "$ok" ]; then cat /tmp/hyrouter/hyrouterd.log; echo "the interface did not answer"; exit 1; fi
+            /opt/etc/init.d/S99hyrouter status
+            opkg remove hyrouter-keenetic
+            test ! -e /opt/sbin/hyrouterd
+            if wget -qO- -T 2 http://127.0.0.1:8088/api/session >/dev/null 2>&1; then echo "still running"; exit 1; fi'

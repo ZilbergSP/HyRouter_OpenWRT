@@ -3,13 +3,11 @@
 package web
 
 import (
-	"bufio"
 	"errors"
 	"fmt"
 	"net"
 	"net/http"
 	"net/netip"
-	"os"
 	"slices"
 	"strings"
 
@@ -18,6 +16,7 @@ import (
 	"github.com/zilbergsp/hyrouter/internal/edition"
 	"github.com/zilbergsp/hyrouter/internal/groups"
 	"github.com/zilbergsp/hyrouter/internal/hysteria"
+	"github.com/zilbergsp/hyrouter/internal/platform"
 	"github.com/zilbergsp/hyrouter/internal/rules"
 	"github.com/zilbergsp/hyrouter/internal/store"
 )
@@ -44,6 +43,10 @@ type stateView struct {
 	Strategies []presetView       `json:"strategies"`
 	Undo       *ctl.UndoInfo      `json:"undo"`
 	Presets    []presetView       `json:"dnsPresets"`
+	// Platform is the router's system ("openwrt", "keenetic"),
+	// StopCommand how to stop HyRouter from SSH.
+	Platform    string `json:"platform"`
+	StopCommand string `json:"stopCommand"`
 }
 
 func (s *Server) view(st store.State) stateView {
@@ -60,6 +63,7 @@ func (s *Server) view(st store.State) stateView {
 		Undo:     s.Ctl.Undo(),
 		Servers:  make([]hysteria.Profile, 0, len(st.Servers)),
 	}
+	v.Platform, v.StopCommand = platform.ID, platform.StopCommand
 	for _, g := range []groups.Strategy{groups.Failover, groups.Latency, groups.RoundRobin, groups.Random, groups.Sticky} {
 		v.Strategies = append(v.Strategies, presetView{string(g), groups.StrategyLabel(g)})
 	}
@@ -286,40 +290,23 @@ func (s *Server) handleDevices(w http.ResponseWriter, r *http.Request) {
 	}, func(st store.State) error { return s.Store.SaveDevices(st.Devices) }, nil)
 }
 
-// neighbour is a device of the LAN dnsmasq gave an address to.
+// neighbour is a device of the LAN the router knows (DHCP).
 type neighbour struct {
 	MAC  string `json:"mac"`
 	IP   string `json:"ip"`
 	Name string `json:"name"`
 }
 
-// handleNeighbours lists the DHCP leases: the devices to add by a click.
+// handleNeighbours lists the devices the router gave an address to: the
+// devices to add by a click.
 func (s *Server) handleNeighbours(w http.ResponseWriter, r *http.Request) {
-	path := s.Leases
-	if path == "" {
-		path = "/tmp/dhcp.leases"
-	}
 	out := []neighbour{}
-	f, err := os.Open(path)
-	if err == nil {
-		defer f.Close()
-		sc := bufio.NewScanner(f)
-		for sc.Scan() {
-			// expiry mac ip hostname client-id
-			fs := strings.Fields(sc.Text())
-			if len(fs) < 4 {
-				continue
-			}
-			mac, err := rules.ParseMAC(fs[1])
-			if err != nil {
-				continue
-			}
-			name := fs[3]
-			if name == "*" {
-				name = ""
-			}
-			out = append(out, neighbour{MAC: mac.String(), IP: fs[2], Name: name})
+	for _, h := range platform.Hosts(r.Context()) {
+		mac, err := rules.ParseMAC(h.MAC)
+		if err != nil || h.IP == "" {
+			continue
 		}
+		out = append(out, neighbour{MAC: mac.String(), IP: h.IP, Name: h.Name})
 	}
 	slices.SortFunc(out, func(a, b neighbour) int { return strings.Compare(a.Name+a.IP, b.Name+b.IP) })
 	writeJSON(w, http.StatusOK, out)

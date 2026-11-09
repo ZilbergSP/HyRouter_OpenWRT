@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -15,6 +16,15 @@ import (
 	"github.com/zilbergsp/hyrouter/internal/web"
 	webui "github.com/zilbergsp/hyrouter/web"
 )
+
+// cleanup removes what HyRouter put in the kernel; the exit code.
+func cleanup() int {
+	if err := ctl.Cleanup(); err != nil {
+		fmt.Fprintln(os.Stderr, "hyrouterd:", err)
+		return 1
+	}
+	return 0
+}
 
 // run is hyrouterd until SIGTERM or SIGINT; the exit code.
 func run(dir string) int {
@@ -37,6 +47,9 @@ func run(dir string) int {
 		s := c.State().Settings
 		port = s.WebPort
 		if s.Enabled {
+			// With the kill switch, nothing goes direct until the rules
+			// are loaded (KeeneticOS has no earlier boot service).
+			c.CloseAtStart()
 			go func() {
 				ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
 				defer cancel()

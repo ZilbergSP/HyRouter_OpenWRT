@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { api, ApiError } from './lib/api';
-  import type { StateView, Status } from './lib/types';
+  import type { Platform, StateView, Status } from './lib/types';
   import Login from './pages/Login.svelte';
   import Home from './pages/Home.svelte';
   import Servers from './pages/Servers.svelte';
@@ -30,6 +30,7 @@
   let ready = $state(false);
   let loggedIn = $state(false);
   let version = $state('');
+  let platform = $state<Platform>('openwrt');
   let view = $state<StateView | null>(null);
   let status = $state<Status | null>(null);
   let route = $state(currentRoute());
@@ -73,6 +74,7 @@
       try {
         const s = await api.session();
         version = s.version;
+        platform = s.platform ?? 'openwrt';
         loggedIn = s.loggedIn;
         if (loggedIn) await load();
       } catch (e) {
@@ -99,7 +101,7 @@
 {#if !ready}
   <div class="center muted">Загрузка…</div>
 {:else if !loggedIn}
-  <Login {version} onlogin={loggedInNow} />
+  <Login {version} {platform} onlogin={loggedInNow} />
 {:else}
   <div class="layout">
     <aside>

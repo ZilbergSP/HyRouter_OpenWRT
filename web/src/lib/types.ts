@@ -252,7 +252,13 @@ export interface MergeStats {
   missingKept: number;
 }
 
+// The router's system: OpenWrt, or KeeneticOS with Entware.
+export type Platform = 'openwrt' | 'keenetic';
+
 export interface StateView {
+  platform: Platform;
+  // stopCommand stops HyRouter from SSH.
+  stopCommand: string;
   edition: string;
   lite: boolean;
   vless: boolean;
@@ -281,6 +287,7 @@ export interface ServerStatus {
 
 export interface Status {
   edition: string;
+  platform: Platform;
   running: boolean;
   since: string;
   error?: string;
@@ -295,6 +302,7 @@ export interface Session {
   loggedIn: boolean;
   csrf?: string;
   version: string;
+  platform?: Platform;
 }
 
 export interface Neighbour {

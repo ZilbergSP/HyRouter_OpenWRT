@@ -1,0 +1,6 @@
+#!/bin/sh
+# Starts (or restarts, after an upgrade) HyRouter.
+mkdir -p /opt/etc/hyrouter
+chmod 700 /opt/etc/hyrouter
+/opt/etc/init.d/S99hyrouter restart
+exit 0

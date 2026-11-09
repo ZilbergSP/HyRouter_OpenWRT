@@ -14,7 +14,7 @@ import (
 
 	"github.com/zilbergsp/hyrouter/internal/edition"
 	"github.com/zilbergsp/hyrouter/internal/flows"
-	"github.com/zilbergsp/hyrouter/internal/nft"
+	"github.com/zilbergsp/hyrouter/internal/platform"
 	"github.com/zilbergsp/hyrouter/internal/rules"
 	"github.com/zilbergsp/hyrouter/internal/store"
 )
@@ -29,7 +29,6 @@ import (
 var (
 	conntrackFile  = "/proc/net/nf_conntrack"
 	conntrackAcct  = "/proc/sys/net/netfilter/nf_conntrack_acct"
-	leasesFile     = "/tmp/dhcp.leases"
 	conntrackEvery = 5 * time.Second
 )
 
@@ -40,6 +39,9 @@ type devices struct {
 	pfxs   []devicePrefix
 	leases map[rules.MAC]string
 	readAt time.Time
+	// reading: the names are being read (platform.Hosts may ask the
+	// firmware, which takes a while): the old ones serve meanwhile.
+	reading bool
 }
 
 type devicePrefix struct {
@@ -71,8 +73,8 @@ func (d *devices) set(list []store.Device) {
 }
 
 // name names the device of a connection: a device of the settings, else
-// the host name of its DHCP lease, else its address. key is what the
-// statistics count it by.
+// the name the router knows it by (DHCP), else its address. key is what
+// the statistics count it by.
 func (d *devices) name(mac rules.MAC, ip netip.Addr) (name, key string) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -87,8 +89,9 @@ func (d *devices) name(mac rules.MAC, ip netip.Addr) (name, key string) {
 		}
 	}
 	if !mac.IsZero() {
-		if time.Since(d.readAt) > 30*time.Second {
-			d.leases, d.readAt = readLeases(), time.Now()
+		if time.Since(d.readAt) > 30*time.Second && !d.reading {
+			d.reading = true
+			go d.readNames()
 		}
 		if h := d.leases[mac]; h != "" {
 			return h, "mac:" + mac.String()
@@ -105,25 +108,19 @@ func deviceName(d store.Device) string {
 	return d.ID
 }
 
-// readLeases reads dnsmasq's DHCP leases: the host names by MAC.
-func readLeases() map[rules.MAC]string {
+// readNames reads the names the router knows its devices by.
+func (d *devices) readNames() {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
 	out := map[rules.MAC]string{}
-	f, err := os.Open(leasesFile)
-	if err != nil {
-		return out
-	}
-	defer f.Close()
-	sc := bufio.NewScanner(f)
-	for sc.Scan() {
-		fs := strings.Fields(sc.Text()) // expiry mac ip hostname client-id
-		if len(fs) < 4 || fs[3] == "*" {
-			continue
-		}
-		if mac, err := rules.ParseMAC(fs[1]); err == nil {
-			out[mac] = fs[3]
+	for _, h := range platform.Hosts(ctx) {
+		if mac, err := rules.ParseMAC(h.MAC); err == nil && h.Name != "" {
+			out[mac] = h.Name
 		}
 	}
-	return out
+	d.mu.Lock()
+	d.leases, d.readAt, d.reading = out, time.Now(), false
+	d.mu.Unlock()
 }
 
 // ctEntry is one connection of the kernel's table.
@@ -242,10 +239,10 @@ func (c *Controller) conntrackRound(live map[string]*flows.Record) {
 			continue
 		}
 		route := ""
-		switch e.mark & nft.CTMask {
-		case nft.CTDirect:
+		switch e.mark & fwCTMask {
+		case fwCTDirect:
 			route = "direct"
-		case nft.CTBlock:
+		case fwCTBlock:
 			route = "block"
 		default:
 			continue // not decided by HyRouter, or carried by the relay

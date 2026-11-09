@@ -19,6 +19,7 @@ import (
 	"net"
 	"net/http"
 	"net/netip"
+	"slices"
 	"strconv"
 	"sync"
 	"time"
@@ -26,6 +27,7 @@ import (
 	"github.com/zilbergsp/hyrouter/internal/auth"
 	"github.com/zilbergsp/hyrouter/internal/ctl"
 	"github.com/zilbergsp/hyrouter/internal/logx"
+	"github.com/zilbergsp/hyrouter/internal/platform"
 	"github.com/zilbergsp/hyrouter/internal/store"
 )
 
@@ -49,10 +51,9 @@ type Server struct {
 	Version string
 	// UI is the built page.
 	UI fs.FS
-	// Shadow is the password file (auth.Shadow; tests set their own).
+	// Shadow is the password file ("" = the platform's,
+	// platform.PasswordFiles; tests set their own).
 	Shadow string
-	// Leases is dnsmasq's DHCP leases file (/tmp/dhcp.leases).
-	Leases string
 
 	smu      sync.Mutex
 	sessions map[string]session
@@ -285,7 +286,7 @@ func (s *Server) authed(h http.HandlerFunc) http.HandlerFunc {
 
 func (s *Server) handleSession(w http.ResponseWriter, r *http.Request) {
 	_, se, ok := s.sessionOf(r)
-	out := map[string]any{"loggedIn": ok, "version": s.Version}
+	out := map[string]any{"loggedIn": ok, "version": s.Version, "platform": platform.ID}
 	if ok {
 		out["csrf"] = se.csrf
 	}
@@ -313,13 +314,24 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	shadow := s.Shadow
-	if shadow == "" {
-		shadow = auth.Shadow
+	var ok bool
+	var err error
+	if s.Shadow != "" {
+		ok, err = auth.Root(s.Shadow, req.Password)
+	} else {
+		ok, err = auth.RootFrom(platform.PasswordFiles, req.Password)
 	}
-	ok, err := auth.Root(shadow, req.Password)
-	if errors.Is(err, auth.ErrNoPassword) || errors.Is(err, auth.ErrLocked) {
+	if errors.Is(err, auth.ErrNoPassword) {
+		writeError(w, http.StatusForbidden, "у root нет пароля: "+platform.PasswordHint)
+		return
+	}
+	if errors.Is(err, auth.ErrLocked) {
 		writeError(w, http.StatusForbidden, err.Error())
+		return
+	}
+	if ok && slices.Contains(platform.DefaultPasswords, req.Password) {
+		// Anyone in the LAN could guess it.
+		writeError(w, http.StatusForbidden, "у root стандартный пароль: "+platform.PasswordHint)
 		return
 	}
 	if err != nil {
