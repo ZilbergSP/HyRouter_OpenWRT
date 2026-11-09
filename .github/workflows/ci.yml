@@ -118,3 +118,42 @@ jobs:
           sudo apt-get install -y -qq nftables dnsmasq-base >/dev/null
       - name: Routing in network namespaces
         run: sudo bash test/netns.sh "$RUNNER_TEMP/hyrouterd" "$RUNNER_TEMP/hysteria" "$(jq -r .hysteria.version build/deps.json)"
+  # The packages of both editions, installed on OpenWrt 24.10 (opkg) and
+  # 25.12 (apk) in the official rootfs images.
+  packages:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version: '1.27.x'
+          check-latest: true
+      - name: shellcheck
+        run: shellcheck build/package.sh build/apk.sh build/openwrt/postinst build/openwrt/prerm
+      - name: Packages (.ipk and .apk)
+        run: |
+          bash build/package.sh 0.0.0 "$RUNNER_TEMP/out"
+          docker run --rm -v "$RUNNER_TEMP/out:/out" openwrt/rootfs:x86-64-25.12.6 /bin/sh /out/apk.sh
+      - name: Install on OpenWrt 24.10 (opkg)
+        run: |
+          docker run --rm -v "$RUNNER_TEMP/out/packages:/p:ro" openwrt/rootfs:x86-64-24.10.8 /bin/sh -c '
+            set -e
+            mkdir -p /var/lock
+            opkg update >/dev/null
+            opkg install /p/hyrouter_0.0.0-1_x86_64.ipk
+            hyrouterd -version
+            sh -n /etc/init.d/hyrouter
+            grep -q /etc/hyrouter/ /lib/upgrade/keep.d/hyrouter
+            if opkg install /p/hyrouter-lite_0.0.0-1_x86_64.ipk 2>/dev/null; then echo "Lite installed over HyRouter"; exit 1; fi
+            opkg remove hyrouter
+            test ! -e /usr/bin/hyrouterd'
+      - name: Install on OpenWrt 25.12 (apk)
+        run: |
+          docker run --rm -v "$RUNNER_TEMP/out/packages:/p:ro" openwrt/rootfs:x86-64-25.12.6 /bin/sh -c '
+            set -e
+            apk update >/dev/null
+            apk add --allow-untrusted /p/hyrouter-0.0.0-r1_x86_64.apk
+            hyrouterd -version
+            sh -n /etc/init.d/hyrouter
+            apk del hyrouter
+            test ! -e /usr/bin/hyrouterd'

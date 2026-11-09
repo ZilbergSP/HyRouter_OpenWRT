@@ -1,0 +1,7 @@
+#!/bin/sh
+# Stopping removes HyRouter's table and routing rule: the LAN goes on as
+# without HyRouter. The settings in /etc/hyrouter stay.
+[ -n "$IPKG_INSTROOT" ] && exit 0
+/etc/init.d/hyrouter stop 2>/dev/null
+/etc/init.d/hyrouter disable
+exit 0
