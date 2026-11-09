@@ -755,7 +755,9 @@ func (c *Controller) zapretPickRun(why string) {
 		finish(errors.New("подбирать нечего: выбранные сервисы идут через VPN или заданы только адресами"))
 		return
 	}
-	update(func(p *ZapretPickView) { p.Step = "Проверяю без обхода: что блокируется и как" })
+	update(func(p *ZapretPickView) {
+		p.Step = "Проверяю без обхода: что блокируется и как"
+	})
 	var skipped []string
 	if slices.Contains(left, zapret.Sites) {
 		r := check(0, zapret.SiteProbes(cfg.Sites))
