@@ -169,7 +169,8 @@ textarea:focus {
   border-color: var(--accent);
 }
 
-input[type='checkbox'] {
+input[type='checkbox'],
+input[type='radio'] {
   width: auto;
 }
 

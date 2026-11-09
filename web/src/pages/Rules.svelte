@@ -1,10 +1,22 @@
 <script lang="ts">
   import { api, errorText } from '../lib/api';
-  import type { Action, Rule, RulesConfig, StateView } from '../lib/types';
+  import type { Action, GeoStatus, Rule, RulesConfig, StateView } from '../lib/types';
   import RuleEditor from './RuleEditor.svelte';
   import TargetSelect from '../lib/TargetSelect.svelte';
   import FallbackList from '../lib/FallbackList.svelte';
   import { mainName, targetName } from '../lib/targets';
+  import {
+    applyScheme,
+    missingLists,
+    ruleFromTemplate,
+    schemes,
+    schemeTemplates,
+    sourceName,
+    templates,
+    tplGroups,
+    type Scheme,
+    type Template,
+  } from '../lib/templates';
 
   let { view, onstate }: { view: StateView; onstate: (v: StateView) => void } = $props();
 
@@ -106,6 +118,56 @@
   }
 
   const blank: Rule = { name: '', action: 'tunnel' };
+  // The rule the editor of a new rule starts from: blank or a template's.
+  let draft = $state<{ rule: Rule; title?: string }>({ rule: blank });
+
+  function add() {
+    draft = { rule: blank };
+    picking = false;
+    editing = -1;
+  }
+
+  // «Шаблоны»: the rule database in use, read when the list opens, tells
+  // which lists of the templates it lacks (null: not known, no warnings).
+  let picking = $state(false);
+  let geo = $state<GeoStatus | null>(null);
+
+  async function openTemplates() {
+    picking = true;
+    try {
+      geo = await api.geo();
+    } catch {
+      geo = null;
+    }
+  }
+
+  function fromTemplate(t: Template) {
+    draft = { rule: ruleFromTemplate(t), title: `Новое правило: ${t.name}` };
+    picking = false;
+    editing = -1;
+  }
+
+  function schemeWarning(sc: Scheme): string {
+    if (!geo) return '';
+    if (sc.source && sc.source !== geo.source) {
+      return `Рассчитана на базу ${sourceName(geo, sc.source)}: выберите её в «Настройки → Базы geosite и geoip».`;
+    }
+    const miss = missingLists(
+      schemeTemplates(sc).flatMap((t) => t.domains),
+      geo,
+    );
+    return miss ? `Часть списков не сработает: ${miss}.` : '';
+  }
+
+  function useScheme(sc: Scheme) {
+    const rest = sc.rest === 'direct' ? 'напрямую' : 'через VPN';
+    const msg =
+      `«${sc.name}»\n\nПравила схемы встанут в начало списка и будут действовать для всех устройств, ` +
+      `«Всё остальное» станет «${rest}». Ваши правила останутся ниже. Изменения применятся кнопкой «Сохранить и применить».`;
+    if (!confirm(msg)) return;
+    picking = false;
+    change(() => (cfg = applyScheme($state.snapshot(cfg) as RulesConfig, sc)));
+  }
 </script>
 
 <h1>Правила</h1>
@@ -126,14 +188,64 @@
 {#if saved}<div class="notice ok">Правила применены. Уже открытые соединения сохраняют прежний маршрут.</div>{/if}
 
 {#if editing === -1}
-  <RuleEditor rule={blank} {view} onsave={edited} oncancel={() => (editing = null)} />
+  <RuleEditor rule={draft.rule} title={draft.title} {view} onsave={edited} oncancel={() => (editing = null)} />
+{/if}
+
+{#if picking}
+  <div class="card picker">
+    <div class="row head">
+      <h2>Шаблоны</h2>
+      <span class="spacer"></span>
+      <button class="link" onclick={() => (picking = false)}>Закрыть</button>
+    </div>
+    <p class="muted small">
+      Списки сайтов и адресов в шаблонах (<code>geosite:…</code>, <code>geoip:…</code>) берутся из базы правил{#if geo}{' '}<b>{sourceName(geo, geo.source)}</b>{/if} и обновляются
+      сами. Сменить базу: «Настройки → Базы geosite и geoip».
+    </p>
+
+    <h3>Готовые схемы</h3>
+    <p class="muted small">
+      Схема — несколько правил для всех устройств и «Всё остальное». Её правила встают в начало списка, ваши остаются ниже.
+    </p>
+    <div class="tpls schemes">
+      {#each schemes as sc (sc.id)}
+        {@const warn = schemeWarning(sc)}
+        <div class="tpl">
+          <strong>{sc.name}</strong>
+          <span class="muted small">{sc.hint}</span>
+          {#if warn}<span class="warn small">{warn}</span>{/if}
+          <button class="use" disabled={editing !== null} onclick={() => useScheme(sc)}>Добавить к правилам</button>
+        </div>
+      {/each}
+    </div>
+
+    <h3>Отдельные правила</h3>
+    <p class="muted small">
+      Шаблон откроется как новое правило: выберите устройства (ни одного — все устройства сети) и сервер, затем нажмите «Готово».
+    </p>
+    {#each tplGroups as g (g)}
+      <div class="group">{g}</div>
+      <div class="tpls">
+        {#each templates.filter((t) => t.group === g) as t (t.id)}
+          {@const miss = missingLists(t.domains, geo)}
+          <button class="tpl" disabled={editing !== null} onclick={() => fromTemplate(t)}>
+            <strong>{t.name}</strong>
+            <span class="muted small">{t.hint}</span>
+            <code class="lists">{t.domains.join(' ')}</code>
+            {#if miss}<span class="warn small">{miss}</span>{/if}
+          </button>
+        {/each}
+      </div>
+    {/each}
+  </div>
 {/if}
 
 <div class="card">
   <div class="row head">
     <h2>Правила</h2>
     <span class="spacer"></span>
-    <button class="primary" disabled={editing !== null} onclick={() => (editing = -1)}>Добавить правило</button>
+    <button disabled={editing !== null} onclick={openTemplates}>Шаблоны</button>
+    <button class="primary" disabled={editing !== null} onclick={add}>Добавить правило</button>
   </div>
   {#if cfg.rules.length === 0}
     <p class="muted">Правил пока нет: всё идёт по «Всё остальное».</p>
@@ -242,5 +354,49 @@
   }
   .fallbacks {
     margin-top: 12px;
+  }
+  .picker {
+    border-color: var(--accent);
+  }
+  .picker h3 {
+    margin: 16px 0 4px;
+    font-size: 1rem;
+  }
+  .group {
+    margin: 12px 0 6px;
+    font-weight: 600;
+    font-size: 0.9rem;
+  }
+  .tpls {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(min(220px, 100%), 1fr));
+    gap: 8px;
+    margin-top: 8px;
+  }
+  .tpls.schemes {
+    grid-template-columns: repeat(auto-fill, minmax(min(280px, 100%), 1fr));
+  }
+  .tpl {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+    text-align: left;
+    padding: 10px 12px;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: var(--panel-2);
+    min-width: 0;
+  }
+  .tpl .use {
+    margin-top: auto;
+  }
+  .lists {
+    color: var(--muted);
+    font-size: 0.78rem;
+    overflow-wrap: anywhere;
+  }
+  .warn {
+    color: var(--warn);
   }
 </style>

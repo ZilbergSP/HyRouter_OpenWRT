@@ -29,6 +29,7 @@ HyRouter — версия [HyRoute](https://github.com/lardan099/HyRoute) для
 | Блокировка при загрузке: сеть не выходит в интернет, пока HyRouter не применит правила | v0.4.0 |
 | HyRouter Lite: Hysteria 2 внутри hyrouterd, без отдельного процесса и скачивания ядра | v0.4.0 |
 | Роутеры Keenetic (KeeneticOS с Entware): правила на iptables и ipset | v0.5.0 |
+| Шаблоны правил, как в HyRoute: готовые схемы («Через VPN только заблокированное», «Всё через VPN, кроме российского», RoscomVPN) и правила для сервисов | v0.6.0 |
 
 ## Две редакции
 

@@ -128,8 +128,20 @@ export interface Sub {
 export interface GeoSource {
   id: string;
   name: string;
+  short: string;
   description: string;
   size: string;
+}
+
+// A well-known geosite (kind "site") or geoip ("ip") category and the
+// databases that have it.
+export interface GeoCategory {
+  name: string;
+  kind: 'site' | 'ip';
+  title: string;
+  hint: string;
+  group: string;
+  sources: string[];
 }
 
 export interface GeoStatus {
@@ -143,6 +155,7 @@ export interface GeoStatus {
   sites: string[];
   ips: string[];
   missing: string[];
+  categories: GeoCategory[];
 }
 
 export interface ConnView {

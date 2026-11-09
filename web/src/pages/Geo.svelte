@@ -81,8 +81,8 @@
       Обновлена: {when(geo.updated)}.
       {#if geo.sites.length + geo.ips.length > 0}
         На роутере: {[...geo.sites.map((n) => 'geosite:' + n), ...geo.ips.map((n) => 'geoip:' + n)].join(', ')}.
-      {:else}
-        Правила пока не используют категории.
+      {:else if geo.missing.length === 0}
+        Правила пока не используют категории: скачивать нечего. Добавьте шаблон «Заблокированное в России» или «YouTube» в разделе «Правила».
       {/if}
     </div>
     {#if geo.missing.length > 0}

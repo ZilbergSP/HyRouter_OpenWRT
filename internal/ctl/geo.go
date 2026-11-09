@@ -284,6 +284,9 @@ type GeoStatus struct {
 	// Missing are the categories the rules name that are not in the
 	// cache (they match nothing until a download brings them).
 	Missing []string `json:"missing"`
+	// Categories are the well-known categories with the databases that
+	// have them: the rule templates warn about a list the chosen one lacks.
+	Categories []geodata.Category `json:"categories"`
 }
 
 // geoSource is the chosen source.
@@ -301,6 +304,7 @@ func (c *Controller) GeoStatus() GeoStatus {
 	gs := c.geo.state()
 	out := GeoStatus{Source: geoSource(st.Settings).ID, Sources: geodata.Sources, Auto: st.Settings.Geo.Auto,
 		Updated: gs.Updated, Checked: gs.Checked, Error: gs.Error, Busy: c.geoBusy.Load(), Missing: []string{}}
+	out.Categories = geodata.Popular
 	out.Sites, out.IPs = c.geo.cached()
 	if out.Sites == nil {
 		out.Sites = []string{}

@@ -6,11 +6,13 @@
   let {
     rule,
     view,
+    title,
     onsave,
     oncancel,
   }: {
     rule: Rule;
     view: StateView;
+    title?: string; // default: the rule's name, or «Новое правило»
     onsave: (r: Rule) => void;
     oncancel: () => void;
   } = $props();
@@ -67,7 +69,7 @@
 </script>
 
 <form class="card editor" onsubmit={save}>
-  <h2>{rule.name ? `Правило «${rule.name}»` : 'Новое правило'}</h2>
+  <h2>{title ?? (rule.name ? `Правило «${rule.name}»` : 'Новое правило')}</h2>
 
   <label class="field">
     <span>Название</span>
