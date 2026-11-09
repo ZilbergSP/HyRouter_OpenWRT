@@ -5,15 +5,19 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"testing"
 )
 
 // TestNFQWS2DryRun runs the real nfqws2 with --dry-run on every command
-// line HyRouter builds: each method alone and the circular plan, for all
-// targets, as root and dropping to a user. nfqws2 checks its options and
-// files and exits; a line it does not accept fails the test. CI downloads
-// the zapret2 release pinned in build/deps.json, checks its sums and sets
-// HYROUTER_ZAPRET_DIR to the unpacked zapret2-<version> folder.
+// line HyRouter builds: each library method alone, generated strategies
+// (the neighbors of every library method and a spread over the whole
+// space), the circular plan with generated ones in it, for all targets and
+// own sites by name and by address, as root and dropping to a user.
+// nfqws2 checks its options and files and exits; a line it does not accept
+// fails the test. CI downloads the zapret2 release pinned in
+// build/deps.json, checks its sums and sets HYROUTER_ZAPRET_DIR to the
+// unpacked zapret2-<version> folder.
 func TestNFQWS2DryRun(t *testing.T) {
 	src := os.Getenv("HYROUTER_ZAPRET_DIR")
 	if src == "" {
@@ -38,8 +42,10 @@ func TestNFQWS2DryRun(t *testing.T) {
 	for _, f := range BlobFiles {
 		copyFile(t, filepath.Join(src, "files", "fake", f), filepath.Join(dir, "blobs", f))
 	}
+	// Own sites by name and by address (documentation networks).
+	sites := []string{"example.com", "example.org", "192.0.2.0/24", "2001:db8::/32"}
 	lists := filepath.Join(dir, "lists")
-	if err := WriteLists(lists, []string{"example.com", "example.org"}, []netip.Addr{netip.MustParseAddr("192.0.2.1")}); err != nil {
+	if err := WriteLists(lists, sites, []netip.Addr{netip.MustParseAddr("192.0.2.1")}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -49,16 +55,42 @@ func TestNFQWS2DryRun(t *testing.T) {
 		user  string
 	}
 	var runs []run
-	for _, m := range Methods {
+	alone := func(name, id string) {
 		plans := map[Target]Plan{}
 		for _, tg := range Targets {
-			plans[tg] = Plan{Methods: []string{m.ID}}
+			plans[tg] = Plan{Methods: []string{id}}
 		}
-		runs = append(runs, run{name: m.ID, plans: plans})
+		runs = append(runs, run{name: name, plans: plans})
 	}
+	for _, m := range Methods {
+		alone(m.ID, m.ID)
+	}
+	var gen []string
+	add := func(s Strategy) {
+		if id := s.ID(); !slices.Contains(gen, id) {
+			gen = append(gen, id)
+		}
+	}
+	for _, m := range Methods {
+		if s, ok := AsStrategy(m.ID); ok {
+			for _, n := range Neighbors(s) {
+				add(n)
+			}
+		}
+	}
+	for _, s := range Broad(48, 1) {
+		add(s)
+	}
+	for _, id := range gen {
+		alone(id, id)
+	}
+	t.Logf("%d library methods, %d generated strategies", len(Methods), len(gen))
+	// A pick's result: generated strategies first, then the library.
 	circular := map[Target]Plan{}
 	for _, tg := range Targets {
-		p, _ := Settings{Enabled: true, Targets: Targets}.PlanFor(tg, "")
+		s := Settings{Enabled: true, Targets: Targets, Picked: map[string]Picked{"net": {
+			Methods: map[Target]string{tg: gen[0]}, Working: map[Target][]string{tg: gen[:6]}}}}
+		p, _ := s.PlanFor(tg, "net")
 		circular[tg] = p
 	}
 	runs = append(runs, run{name: "circular", plans: circular})
@@ -68,7 +100,7 @@ func TestNFQWS2DryRun(t *testing.T) {
 	}
 
 	for _, r := range runs {
-		args, err := Build(BuildConfig{Dir: dir, Lists: lists, Plans: r.plans, QNum: QNumBypass, User: r.user})
+		args, err := Build(BuildConfig{Dir: dir, Lists: lists, Plans: r.plans, Sites: sites, QNum: QNumBypass, User: r.user})
 		if err != nil {
 			t.Fatalf("%s: %v", r.name, err)
 		}

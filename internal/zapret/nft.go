@@ -121,17 +121,40 @@ func NFT(c NFTConfig) (string, error) {
 		w("\t}")
 	}
 
-	// In: the first answers, for circular's failure detector. Priority -101
-	// is before dstnat (-100) undoes the masquerade: the answer still has
-	// the WAN address nfqws2 saw its query leave from (zapret2's prenat).
-	if c.Queue.In && len(c.Queue.TCP) > 0 {
+	// In: the server's answers. The first one always: the SYN-ACK, whose
+	// TTL autottl reads (ip_autottl: without it the fake keeps its TTL and
+	// reaches the server, which breaks the handshake); with circular the
+	// first tcpPktIn, for its failure detector. An answer to a probe slot
+	// goes to that slot's tester. Priority -101 is before dstnat (-100)
+	// undoes the masquerade: the answer still has the WAN address nfqws2
+	// saw its query leave from (zapret2's prenat).
+	if len(c.Queue.TCP) > 0 || c.Probes {
+		in := "1"
+		if c.Queue.In {
+			in = fmt.Sprintf("1-%d", tcpPktIn)
+		}
 		w("\tchain zapret_pre {")
 		w("\t\ttype filter hook prerouting priority -101; policy accept;")
 		w("\t\tiifname != %s return", wan)
 		w("\t\tip saddr @%s return", SetSkip4)
 		w("\t\tip6 saddr @%s return", SetSkip6)
-		w("\t\ttcp dport %s return", probes)
-		w("\t\ttcp sport { %s } ct reply packets 1-%d queue num %d bypass", strings.Join(c.Queue.TCP, ", "), tcpPktIn, QNumBypass)
+		if c.Probes {
+			w("\t\ttcp dport %s goto zapret_probe_in", probes)
+		} else {
+			w("\t\ttcp dport %s return", probes)
+		}
+		if len(c.Queue.TCP) > 0 {
+			w("\t\ttcp sport { %s } ct reply packets %s queue num %d bypass", strings.Join(c.Queue.TCP, ", "), in, QNumBypass)
+		}
+		w("\t}")
+	}
+	if c.Probes {
+		// A tester runs one method: its SYN-ACK is enough.
+		w("\tchain zapret_probe_in {")
+		for i := 1; i < ProbeSlots; i++ {
+			slo, shi := ProbeSlot(i)
+			w("\t\ttcp dport %d-%d ct reply packets 1 queue num %d bypass", slo, shi, QNumBypass+i)
+		}
 		w("\t}")
 	}
 

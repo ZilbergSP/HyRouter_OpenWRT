@@ -2,6 +2,7 @@ package rules
 
 import (
 	"net/netip"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -190,5 +191,46 @@ func TestDeviceExplain(t *testing.T) {
 	q.Device = ""
 	if ex := Explain(c, "", q); ex.Winner.Index != -1 || !strings.Contains(ex.Steps[0].Reason, "не указано") {
 		t.Errorf("no device: %+v", ex.Steps[0])
+	}
+}
+
+// «Навести порядок» keeps the rules of each device apart: it merges only
+// rules for the same devices, and a rule for every device between them
+// keeps them where they are.
+func TestDeviceTidy(t *testing.T) {
+	withGeo(t, fakeGeo{})
+	tv, pc := "aa:bb:cc:00:00:01", "aa:bb:cc:00:00:02"
+	c := Config{DefaultAction: Direct, Rules: []Rule{
+		{ID: "1", Devices: []string{tv}, Domains: []string{".youtube.com"}, Action: Tunnel, Profile: "nl"},
+		{ID: "2", Devices: []string{pc}, Domains: []string{".twitch.tv"}, Action: Tunnel, Profile: "nl"},
+		{ID: "3", Devices: []string{tv}, Domains: []string{".instagram.com"}, Action: Tunnel, Profile: "nl"},
+		{ID: "4", Devices: []string{tv}, Domains: []string{"www.youtube.com"}, Action: Tunnel, Profile: "nl"},
+		{ID: "5", Devices: []string{pc}, Domains: []string{"www.youtube.com"}, Action: Tunnel, Profile: "nl"},
+		{ID: "6", Domains: []string{".x.com"}, Action: Tunnel, Profile: "nl"},
+	}}
+	// 4 repeats 1 (the same device), 5 is for another device. 1 and 3
+	// merge; 2 and 5 merge past 3 and 4 (the other device); 6 is for every
+	// device.
+	if got := tidyIDs(TidyRules(c, TidyOptions{})); !slices.Equal(got, []string{"drop:4", "merge:1,3", "merge:2,5"}) {
+		t.Fatalf("%v", got)
+	}
+	out := ApplyTidy(c, TidyOptions{}, []string{"drop:4", "merge:1,3", "merge:2,5"})
+	if got := ids(out); !slices.Equal(got, []string{"1=.youtube.com+.instagram.com", "2=.twitch.tv+www.youtube.com", "6=.x.com"}) ||
+		!slices.Equal(out.Rules[0].Devices, []string{tv}) || !slices.Equal(out.Rules[1].Devices, []string{pc}) {
+		t.Fatalf("%v", got)
+	}
+	// A rule for every device between, meeting the sites: no merge. For
+	// another device only: the merge is fine.
+	c2 := Config{DefaultAction: Direct, Rules: []Rule{
+		{ID: "a", Devices: []string{tv}, Domains: []string{".a.com"}, Action: Tunnel},
+		{ID: "b", Domains: []string{"x.c.com"}, Action: Direct},
+		{ID: "c", Devices: []string{tv}, Domains: []string{".c.com"}, Action: Tunnel},
+	}}
+	if got := tidyIDs(TidyRules(c2, TidyOptions{})); len(got) != 0 {
+		t.Fatalf("%v", got)
+	}
+	c2.Rules[1].Devices = []string{pc}
+	if got := tidyIDs(TidyRules(c2, TidyOptions{})); !slices.Equal(got, []string{"merge:a,c"}) {
+		t.Fatalf("%v", got)
 	}
 }

@@ -18,6 +18,8 @@ package zapret
 import (
 	"errors"
 	"fmt"
+	"net"
+	"net/netip"
 	"slices"
 	"strings"
 	"time"
@@ -59,6 +61,8 @@ const (
 	// VPN: the target goes through HyRouter's main server instead (a
 	// bypass cannot open what is blocked by address); the user's choice only.
 	VPN = "vpn"
+	// ViaRules: a target through the VPN follows the user's rules.
+	ViaRules = "rules"
 )
 
 // Method is a desync recipe for TLS (and HTTP) over TCP: the --lua-desync
@@ -74,11 +78,16 @@ type Method struct {
 // through: the most often working first. Adapted from the presets of
 // TheFirstNoob/Zapret-2-GUI (MIT), built on zapret2's zapret-antidpi.lua.
 var Methods = []Method{
-	{ID: "fake-seqovl", Name: "Фейк + разрез с перекрытием", tcp: []string{
-		"fake:blob=google_tls:tcp_ts=-1000:repeats=8",
+	// The fakes die by TCP MD5 or by TTL: Windows sends no TCP timestamps,
+	// so the presets' tcp_ts=-1000 spoils nothing there and the fake
+	// reaches the server, which breaks the handshake (Windows CI: example.com
+	// through each method). tcp_md5 keeps tcp_ts: on a system with
+	// timestamps both spoil it.
+	{ID: "fake-seqovl", Name: "Фейк (TTL по расстоянию) + разрез с перекрытием", tcp: []string{
+		"fake:blob=google_tls:ip_autottl=-2,3-20:ip6_autottl=-2,3-20:repeats=8",
 		"multisplit:pos=1,midsld:seqovl=681:seqovl_pattern=google_tls"}},
 	{ID: "fake-seqovl-mod", Name: "Фейк со случайными полями + разрез с перекрытием", tcp: []string{
-		"fake:blob=google_tls:tcp_ts=-1000:repeats=8:tls_mod=rnd,dupsid",
+		"fake:blob=google_tls:tcp_ts=-1000:tcp_md5:repeats=8:tls_mod=rnd,dupsid",
 		"multisplit:pos=1,midsld:seqovl=681:seqovl_pattern=google_tls"}},
 	{ID: "fake-md5-seqovl", Name: "Фейк с TCP MD5 + разрез с перекрытием", tcp: []string{
 		"fake:blob=google_tls:tcp_ts=-1000:repeats=7:tcp_md5",
@@ -87,31 +96,37 @@ var Methods = []Method{
 		"multisplit:pos=2:seqovl=681:seqovl_pattern=google_tls:repeats=7",
 		"multisplit:pos=2,midsld:repeats=7"}},
 	{ID: "fake", Name: "Только фейк", tcp: []string{
-		"fake:blob=google_tls:tcp_ts=-1000:repeats=7"}},
+		"fake:blob=google_tls:tcp_ts=-1000:tcp_md5:repeats=7"}},
 	{ID: "fake-disorder", Name: "Фейк + перестановка частей", tcp: []string{
-		"fake:blob=google_tls:tcp_ts=-1000:repeats=7",
+		"fake:blob=google_tls:tcp_ts=-1000:tcp_md5:repeats=7",
 		"multidisorder:pos=1,midsld"}},
+	// fakedsplit's fake parts are spoiled as its fakes are, and filled with
+	// the pattern (its "blob" would split that blob instead of the real
+	// ClientHello).
 	{ID: "fakedsplit", Name: "Фейк + разрез с фейковыми частями", tcp: []string{
-		"fake:blob=google_tls:tcp_ts=-1000:repeats=7",
-		"fakedsplit:blob=google_tls:pos=2"}},
+		"fake:blob=google_tls:tcp_ts=-1000:tcp_md5:repeats=7",
+		"fakedsplit:pos=2:pattern=google_tls:tcp_ts=-1000:tcp_md5"}},
 	{ID: "hostfakesplit", Name: "Фейк + подмена имени сайта в части", tcp: []string{
-		"fake:blob=google_tls:tcp_ts=-1000:repeats=7",
-		"hostfakesplit:host={host}"}},
+		"fake:blob=google_tls:tcp_ts=-1000:tcp_md5:repeats=7",
+		"hostfakesplit:host={host}:tcp_ts=-1000:tcp_md5"}},
 	// Under a white-listed name (vk.com): against the "16-20 KB" cut of
 	// CDN addresses (Discord's media on Cloudflare), as Flowseal's general
 	// list does with 4pda.to.
 	{ID: "seqovl-vk", Name: "Разрез с перекрытием под vk.com", tcp: []string{
 		"multisplit:pos=1:seqovl=568:seqovl_pattern=vk_tls"}},
 	{ID: "fake-vk-seqovl", Name: "Фейк vk.com + разрез с перекрытием", tcp: []string{
-		"fake:blob=vk_tls:tcp_ts=-1000:repeats=6",
+		"fake:blob=vk_tls:tcp_ts=-1000:tcp_md5:repeats=6",
 		"multisplit:pos=1,midsld:seqovl=681:seqovl_pattern=vk_tls"}},
 	{ID: "hostfakesplit-vk", Name: "Фейк vk.com + подмена имени на vk.com", tcp: []string{
-		"fake:blob=vk_tls:tcp_ts=-1000:repeats=6",
-		"hostfakesplit:host=vk.com"}},
+		"fake:blob=vk_tls:tcp_ts=-1000:tcp_md5:repeats=6",
+		"hostfakesplit:host=vk.com:tcp_ts=-1000:tcp_md5"}},
 }
 
 // FindMethod is a method by ID.
 func FindMethod(id string) (Method, bool) {
+	if st, ok := ParseStrategy(id); ok {
+		return Method{ID: id, Name: st.Name(), tcp: st.instances()}, true
+	}
 	i := slices.IndexFunc(Methods, func(m Method) bool { return m.ID == id })
 	if i < 0 {
 		return Method{}, false
@@ -143,6 +158,14 @@ type Settings struct {
 	Sites []string `json:"sites,omitempty"`
 	// Methods: a method fixed by the user per target (absent = Auto).
 	Methods map[Target]string `json:"methods,omitempty"`
+	// Via: where a target set to VPN goes. Absent: the main server (as
+	// before 1.3.23); ViaRules: by the user's own rules (the bypass keeps
+	// no rule for it); else a server or group ID.
+	Via map[Target]string `json:"via,omitempty"`
+	// AutoHeal: HyRouter checks the services through the running bypass
+	// and picks again by itself when one stops opening, or on a network
+	// with no pick yet. nil = on.
+	AutoHeal *bool `json:"autoHeal,omitempty"`
 	// Picked: what auto-pick found, per network (NetKey).
 	Picked map[string]Picked `json:"picked,omitempty"`
 }
@@ -161,6 +184,9 @@ const (
 	MaxSites   = 500
 	MaxNetKeys = 32
 )
+
+// Heals reports that HyRouter looks after the bypass by itself (AutoHeal).
+func (s Settings) Heals() bool { return s.AutoHeal == nil || *s.AutoHeal }
 
 // On reports that t goes through the bypass.
 func (s Settings) On(t Target) bool { return s.Enabled && slices.Contains(s.Targets, t) }
@@ -188,6 +214,14 @@ func (s *Settings) Normalize() {
 			delete(s.Methods, t)
 		}
 	}
+	for t, v := range s.Via {
+		if s.Methods[t] != VPN || v == "" || len(v) > 128 {
+			delete(s.Via, t)
+		}
+	}
+	if len(s.Via) == 0 {
+		s.Via = nil
+	}
 	// Methods a newer or older HyRouter picked that this one does not know.
 	for k, pk := range s.Picked {
 		for t, m := range pk.Methods {
@@ -208,8 +242,8 @@ func (s Settings) Validate() error {
 		return fmt.Errorf("сайтов может быть не больше %d", MaxSites)
 	}
 	for _, d := range s.Sites {
-		if !validSite(d) {
-			return fmt.Errorf("«%s» — не имя сайта", d)
+		if NormalizeSite(d) != d {
+			return fmt.Errorf("«%s» — не имя сайта и не внешний адрес или сеть", d)
 		}
 	}
 	if len(s.Picked) > MaxNetKeys {
@@ -218,20 +252,112 @@ func (s Settings) Validate() error {
 	return nil
 }
 
-// NormalizeSite turns what the user typed («https://www.Example.com/x»)
-// into a host name for a hostlist («www.example.com»); "" when it is none.
+// NormalizeSite turns what the user typed into a list entry: a host name
+// («https://www.Example.com/x» → «www.example.com»), an address
+// («1.2.3.4», «[2001:db8::1]:443» → «2001:db8::1») or a network
+// («104.16.1.0/13» → «104.16.0.0/13»); "" when it is none of them.
 func NormalizeSite(s string) string {
 	s = strings.ToLower(strings.TrimSpace(s))
 	s = strings.TrimPrefix(s, "https://")
 	s = strings.TrimPrefix(s, "http://")
-	if i := strings.IndexAny(s, "/?#:"); i >= 0 {
+	if p, ok := siteNet(s); ok {
+		return p
+	}
+	if a, bits, ok := strings.Cut(s, "/"); ok && bits != "" && strings.Trim(bits, "0123456789") == "" {
+		if _, err := netip.ParseAddr(a); err == nil {
+			return "" // a network that is local, too wide or not one
+		}
+	}
+	if i := strings.IndexAny(s, "/?#"); i >= 0 {
 		s = s[:i]
 	}
+	if p, ok := siteNet(s); ok { // an address with a path
+		return p
+	}
+	if h, _, err := net.SplitHostPort(s); err == nil { // with a port
+		if p, ok := siteNet(h); ok {
+			return p
+		}
+		s = h
+	}
 	s = strings.Trim(strings.TrimPrefix(s, "*."), ".")
-	if !validSite(s) {
+	if !validSite(s) || isAddrLike(s) {
 		return ""
 	}
 	return s
+}
+
+// siteNet reads an address or network entry, canonical: the network
+// masked, a single address without its /32 or /128.
+func siteNet(s string) (string, bool) {
+	p, err := netip.ParsePrefix(s)
+	if err != nil {
+		a, aerr := netip.ParseAddr(strings.Trim(s, "[]"))
+		if aerr != nil || a.Zone() != "" {
+			return "", false
+		}
+		p = netip.PrefixFrom(a.Unmap(), a.Unmap().BitLen())
+	}
+	p = netip.PrefixFrom(p.Addr().Unmap(), p.Bits()-map[bool]int{true: 96, false: 0}[p.Addr().Is4In6()]).Masked()
+	if !validNet(p) {
+		return "", false
+	}
+	if p.IsSingleIP() {
+		return p.Addr().String(), true
+	}
+	return p.String(), true
+}
+
+// notPublic: networks no site of the user's lives in. An entry touching
+// them would send the user's own network or the like through nfqws2.
+var notPublic = []netip.Prefix{
+	netip.MustParsePrefix("0.0.0.0/8"), netip.MustParsePrefix("10.0.0.0/8"), netip.MustParsePrefix("100.64.0.0/10"),
+	netip.MustParsePrefix("127.0.0.0/8"), netip.MustParsePrefix("169.254.0.0/16"), netip.MustParsePrefix("172.16.0.0/12"),
+	netip.MustParsePrefix("192.168.0.0/16"), netip.MustParsePrefix("224.0.0.0/3"),
+	netip.MustParsePrefix("::/127"), netip.MustParsePrefix("fc00::/7"), netip.MustParsePrefix("fe80::/10"),
+	netip.MustParsePrefix("ff00::/8"),
+}
+
+// validNet: a public address or network no wider than /8 (IPv4) or /16
+// (IPv6): wider would put a good part of the internet through nfqws2.
+func validNet(p netip.Prefix) bool {
+	if !p.IsValid() || p.Addr().Is4() && p.Bits() < 8 || p.Addr().Is6() && p.Bits() < 16 {
+		return false
+	}
+	for _, np := range notPublic {
+		if p.Overlaps(np) {
+			return false
+		}
+	}
+	return true
+}
+
+// isAddrLike: digits and dots only, as an address that did not parse
+// (1.2.3, 1.2.3.400): never a site name.
+func isAddrLike(s string) bool {
+	return strings.Trim(s, "0123456789.") == ""
+}
+
+// SiteNames are the host names of sites, SiteNets their addresses and
+// networks (canonical entries, as NormalizeSite gives).
+func SiteNames(sites []string) []string {
+	var out []string
+	for _, s := range sites {
+		if _, ok := siteNet(s); !ok {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+func SiteNets(sites []string) []string {
+	var out []string
+	for _, s := range sites {
+		if _, ok := siteNet(s); ok {
+			out = append(out, s)
+		}
+	}
+	return out
 }
 
 // validSite: letters, digits, hyphens and dots, with a dot, at most 253

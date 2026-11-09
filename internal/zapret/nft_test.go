@@ -27,8 +27,9 @@ func TestNFT(t *testing.T) {
 		"udp dport { 443, 19294-19344, 50000-50100 } ct original packets 1-5 meta mark set meta mark | 0x20000000 queue num 200 bypass",
 		"tcp sport 30150-30299 ct original packets 1-20 meta mark set meta mark | 0x20000000 queue num 201 bypass",
 		"type filter hook prerouting priority -101; policy accept;",
-		"tcp dport 30000-31949 return",
+		"tcp dport 30000-31949 goto zapret_probe_in",
 		"tcp sport { 80, 443, 2053, 2083, 2087, 2096, 8443 } ct reply packets 1-10 queue num 200 bypass",
+		"tcp dport 30150-30299 ct reply packets 1 queue num 201 bypass",
 		"meta mark & 0x20000000 != 0 notrack",
 	} {
 		if !strings.Contains(out, want) {
@@ -36,11 +37,22 @@ func TestNFT(t *testing.T) {
 		}
 	}
 	// Slot 0 checks without a bypass: never queued.
-	if strings.Contains(out, "tcp sport 30000-30149") {
+	if strings.Contains(out, "port 30000-30149") {
 		t.Error("slot 0 is queued")
 	}
-	if n := strings.Count(out, "queue num 2"); n != 3+ProbeSlots-1 {
+	if n := strings.Count(out, "queue num 2"); n != 3+2*(ProbeSlots-1) {
 		t.Errorf("%d queue rules", n)
+	}
+
+	// A fixed method: only the SYN-ACK comes back, for autottl.
+	fixed, err := NFT(NFTConfig{WAN: []string{"eth1"}, Queue: QueueFor(map[Target]Plan{YouTube: {Methods: []string{"fake-seqovl"}}})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(fixed, "tcp sport { 80, 443 } ct reply packets 1 queue num 200 bypass") ||
+		!strings.Contains(fixed, "tcp dport 30000-31949 return") || strings.Contains(fixed, "zapret_probe") {
+		t.Errorf("fixed:
+%s", fixed)
 	}
 
 	// Bypass off, no pick: no queue at all; the probe range still skips.

@@ -1,7 +1,7 @@
 # Код из HyRoute
 
 Пакеты `internal/` ниже скопированы из HyRoute (`github.com/lardan099/hyroute`,
-MIT) с коммита `d68dcbe` (v1.3.20). При копировании изменены только пути
+MIT) и сверены с коммитом `499b2ca` (v1.3.23). При копировании изменены только пути
 импорта (`github.com/lardan099/hyroute` → `github.com/zilbergsp/hyrouter`) и
 убраны файлы для Windows и macOS (`*_windows*.go`, `*_darwin*.go`).
 
@@ -10,26 +10,26 @@ internal/<пакет>`, перенести нужное, поправить в �
 
 | Пакет | С коммита | Состояние |
 |---|---|---|
-| `dnscache` | d68dcbe | как есть |
-| `dnspolicy` | d68dcbe | как есть; программа станет устройством (этап 2) |
-| `dnsproxy` | d68dcbe | как есть |
-| `flows` | d68dcbe | как есть |
-| `geodata` | d68dcbe | как есть |
-| `groups` | d68dcbe | как есть |
-| `hy2uri` | d68dcbe | как есть |
-| `hysteria` | 9c5c7b3 | как есть (с `child.go` из v1.3.21 для `nfqws2`); запуск процессов на Linux — этап 2 |
-| `logx` | d68dcbe | как есть |
-| `procinfo` | d68dcbe | только `procinfo.go`: тип `Info` для условия «программы» в `rules` (на роутере не используется) |
-| `release` | d68dcbe | как есть |
-| `ruleconv` | d68dcbe | как есть |
-| `rules` | d68dcbe | + условие «устройства» (`device.go`; поле `Devices`, `Subject.MAC`/`Src`, `Query.Device`); программы остаются, на роутере не используются |
-| `sniff` | d68dcbe | как есть |
-| `socks5` | d68dcbe | как есть |
-| `stats` | d68dcbe | как есть; разрез «программа» станет «устройством» |
-| `subfmt` | d68dcbe | как есть |
-| `tunnels` | d68dcbe | как есть |
-| `vless` | d68dcbe | как есть |
-| `zapret` | 9e42be1 (v1.3.22) | `nfqws2` вместо `winws2`: `--qnum`/`--fwmark`/`--user` вместо фильтров WinDivert (`build.go`), правила nftables (`nft.go`, новый), без `ProbeExclude`/`ProbeOnly`; методы, списки, план, подбор, проверки и супервизор — как есть |
+| `dnscache` | 499b2ca | как есть |
+| `dnspolicy` | 499b2ca | как есть; программа станет устройством (этап 2) |
+| `dnsproxy` | 499b2ca | как есть |
+| `flows` | 499b2ca | как есть |
+| `geodata` | 499b2ca | как есть |
+| `groups` | 499b2ca | как есть |
+| `hy2uri` | 499b2ca | как есть |
+| `hysteria` | 499b2ca | как есть (с `child.go` из v1.3.21 для `nfqws2`); запуск процессов на Linux — этап 2 |
+| `logx` | 499b2ca | как есть |
+| `procinfo` | 499b2ca | только `procinfo.go`: тип `Info` для условия «программы» в `rules` (на роутере не используется) |
+| `release` | 499b2ca | как есть |
+| `ruleconv` | 499b2ca | как есть |
+| `rules` | 499b2ca | + условие «устройства» (`device.go`; поле `Devices`, `Subject.MAC`/`Src`, `Query.Device`); «Навести порядок» (`tidy.go`) объединяет только правила для одних и тех же устройств, а правило для всех устройств между ними, задевающее те же сайты, объединение запрещает; программы остаются, на роутере не используются |
+| `sniff` | 499b2ca | как есть |
+| `socks5` | 499b2ca | как есть |
+| `stats` | 499b2ca | как есть; разрез «программа» станет «устройством» |
+| `subfmt` | 499b2ca | как есть |
+| `tunnels` | 499b2ca | как есть |
+| `vless` | 499b2ca | как есть |
+| `zapret` | 499b2ca | `nfqws2` вместо `winws2`: `--qnum`/`--fwmark`/`--user` вместо фильтров WinDivert (`build.go`), правила nftables (`nft.go`, новый; SYN-ACK всегда в очередь — для `ip_autottl`), без `ProbeExclude`/`ProbeOnly` и без быстрого перезапуска при 0xC0000142 (`DLLInitFailed`, только Windows); методы, генератор, фейки, списки, план, подбор, проверки и супервизор — как есть |
 
 Ещё не перенесены, будут переделаны под роутер: `relay` (TPROXY вместо
 reflect-NAT), `store`, `settings`, контроллер `app`.

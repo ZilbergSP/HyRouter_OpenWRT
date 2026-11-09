@@ -32,6 +32,7 @@ const (
 	ListYouTube  = "youtube.txt"
 	ListDiscord  = "discord.txt"
 	ListSites    = "sites.txt"
+	ListSitesNet = "sites-ip.txt"   // the own sites' addresses and networks
 	ListExcluded = "exclude-ip.txt" // HyRouter's servers: never touched
 )
 
@@ -39,13 +40,16 @@ const (
 type BuildConfig struct {
 	// Dir holds lua/ and blobs/ (absolute).
 	Dir string
-	// Lists holds the list files (absolute), written by WriteLists. It and
-	// the folders above it must be readable by everyone: nfqws2 started as
-	// root runs as User (or uid 2147483647) once its queue is open, and
-	// rereads a list that changed.
+	// Lists holds the list files and the made fakes (absolute), written by
+	// WriteLists. It and the folders above it must be readable by
+	// everyone: nfqws2 started as root runs as User (or uid 2147483647)
+	// once its queue is open, and rereads a list that changed.
 	Lists string
 	// Plans: the targets processed (a target absent is not).
 	Plans map[Target]Plan
+	// Sites: the own sites (Settings.Sites). Their addresses and networks
+	// get profiles by address (--ipset), the names by name.
+	Sites []string
 	// QNum is the NFQUEUE nfqws2 takes its packets from: QNumBypass for
 	// the bypass of the LAN, QNumBypass+i for the tester of probe slot i.
 	// The nftables rules (NFT) decide which packets reach each queue.
@@ -138,6 +142,7 @@ func Build(c BuildConfig) ([]string, error) {
 	for _, name := range []string{"google_tls", "quic_google", "vk_tls"} {
 		args = append(args, "--blob="+name+":@"+filepath.Join(c.Dir, "blobs", BlobFiles[name]))
 	}
+	args = append(args, fakeArgs(c.Lists, c.Plans)...)
 	args = append(args, "--lua-gc=60")
 
 	var profiles [][]string
@@ -158,10 +163,27 @@ func Build(c BuildConfig) ([]string, error) {
 		if t == Sites {
 			l7 = "tls,http"
 		}
-		profiles = append(profiles,
-			tlsProfile(TargetName(t), t, "80,443", l7, hostlist, exclude, p),
-			[]string{"--comment=" + TargetName(t) + " QUIC", "--filter-udp=443", "--filter-l7=quic", hostlist, exclude,
-				"--payload=quic_initial", "--out-range=-d10", "--lua-desync=fake:blob=quic_google"})
+		// The own sites' addresses: by address, whatever name (or none,
+		// or one ECH hides) the connection carries. A name list with
+		// nothing in it is not built when there are addresses.
+		names, nets := true, false
+		if t == Sites {
+			nets = len(SiteNets(c.Sites)) > 0
+			names = len(SiteNames(c.Sites)) > 0 || !nets
+		}
+		if names {
+			profiles = append(profiles,
+				tlsProfile(TargetName(t), t, "80,443", l7, hostlist, exclude, p),
+				[]string{"--comment=" + TargetName(t) + " QUIC", "--filter-udp=443", "--filter-l7=quic", hostlist, exclude,
+					"--payload=quic_initial", "--out-range=-d10", "--lua-desync=fake:blob=quic_google"})
+		}
+		if nets {
+			ipset := "--ipset=" + list(ListSitesNet)
+			profiles = append(profiles,
+				tlsProfile("Свои адреса", t, "80,443", l7, ipset, exclude, p),
+				[]string{"--comment=Свои адреса QUIC", "--filter-udp=443", "--filter-l7=quic", ipset, exclude,
+					"--payload=quic_initial", "--out-range=-d10", "--lua-desync=fake:blob=quic_google"})
+		}
 	}
 	for i, p := range profiles {
 		if i > 0 {
