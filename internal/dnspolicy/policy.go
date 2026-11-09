@@ -76,6 +76,10 @@ func hostName(h string) string {
 type Requester struct {
 	Proc   *procinfo.Info // nil: unknown owner (after waiting), or the Windows DNS client
 	System bool           // the Windows DNS client (Dnscache): it asks for every program
+	// HyRouter: the LAN device that asked, by MAC (zero = unknown) and
+	// address; rules for devices decide its names.
+	MAC rules.MAC
+	Src netip.Addr
 }
 
 // Kind is what happens to a query.
@@ -220,7 +224,7 @@ func (p *Policy) Classify(q Question, req Requester, env Env) Decision {
 		if set == nil {
 			set = &rules.Set{}
 		}
-		nr := set.EvaluateName(rules.Subject{Proc: procFor(req)}, name, rules.SrcQuery)
+		nr := set.EvaluateName(rules.Subject{Proc: procFor(req), MAC: req.MAC, Src: req.Src}, name, rules.SrcQuery)
 		route, pos, cond = byRules(nr)
 		if route.Action != rules.Direct && !p.Cfg.IgnoreAddrRules {
 			for _, a := range nr.Alt {

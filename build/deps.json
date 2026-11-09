@@ -1,4 +1,40 @@
 {
+  "hysteria": {
+    "version": "app/v2.12.3",
+    "assets": {
+      "amd64": {
+        "url": "https://github.com/apernet/hysteria/releases/download/app%2Fv2.12.3/hysteria-linux-amd64",
+        "sha256": "8c7a68a906998b747a0db87586e364f995fbfddb95693ae6e2fdb68a6e920d3e"
+      },
+      "arm64": {
+        "url": "https://github.com/apernet/hysteria/releases/download/app%2Fv2.12.3/hysteria-linux-arm64",
+        "sha256": "c8dc653c3ba0a28d29a26b8fa52d2086f27c0927afddce95c09965e7174e78b0"
+      },
+      "mipsle": {
+        "url": "https://github.com/apernet/hysteria/releases/download/app%2Fv2.12.3/hysteria-linux-mipsle-sf",
+        "sha256": "ebfbe51582766de197d4b941722d6674c37024c1025a565fa6600e98ca598f6f"
+      },
+      "arm": {
+        "url": "https://github.com/apernet/hysteria/releases/download/app%2Fv2.12.3/hysteria-linux-arm",
+        "sha256": "cc4bc596c2db473dd7ec1bbcc3cd10e0cb60302759facd95e0be73bc8751e110"
+      }
+    }
+  },
+  "xray": {
+    "version": "v26.10.31",
+    "assets": {
+      "amd64": {
+        "url": "https://github.com/XTLS/Xray-core/releases/download/v26.10.31/Xray-linux-64.zip",
+        "sha256": "e4bd9119f50ae7c41658b1abd0679ae06f98bd864a2907ff33f2f2cf7081b214",
+        "member": "xray"
+      },
+      "arm64": {
+        "url": "https://github.com/XTLS/Xray-core/releases/download/v26.10.31/Xray-linux-arm64-v8a.zip",
+        "sha256": "1811c8f1da0c3b6dc707ebaf1c8390e987ba39859a8f0a7aadd8526157f2ec8d",
+        "member": "xray"
+      }
+    }
+  },
   "zapret2": {
     "version": "v1.0.7",
     "url": "https://github.com/bol-van/zapret2/releases/download/v1.0.7/zapret2-v1.0.7.zip",
