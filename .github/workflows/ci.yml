@@ -97,3 +97,24 @@ jobs:
           GOARCH=mipsle GOMIPS=softfloat go build -tags lite -trimpath -ldflags '-s -w' -o "$RUNNER_TEMP/hyrouterd-lite-mipsle" ./cmd/hyrouterd
           GOARCH=arm GOARM=7 go build -tags lite -trimpath -ldflags '-s -w' -o "$RUNNER_TEMP/hyrouterd-lite-armv7" ./cmd/hyrouterd
           ls -l "$RUNNER_TEMP"/hyrouterd-*
+  # The routing itself, in network namespaces with a real Hysteria 2
+  # server (test/netns.sh). Root only: here, never on a maintainer's PC.
+  integration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version: '1.27.x'
+          check-latest: true
+      - name: shellcheck
+        run: shellcheck test/netns.sh
+      - name: hyrouterd and the pinned Hysteria
+        run: |
+          CGO_ENABLED=0 go build -o "$RUNNER_TEMP/hyrouterd" ./cmd/hyrouterd
+          curl -fsSL "$(jq -r .hysteria.assets.amd64.url build/deps.json)" -o "$RUNNER_TEMP/hysteria"
+          echo "$(jq -r .hysteria.assets.amd64.sha256 build/deps.json)  $RUNNER_TEMP/hysteria" | sha256sum -c
+          chmod +x "$RUNNER_TEMP/hysteria"
+          sudo apt-get install -y -qq nftables dnsmasq-base >/dev/null
+      - name: Routing in network namespaces
+        run: sudo bash test/netns.sh "$RUNNER_TEMP/hyrouterd" "$RUNNER_TEMP/hysteria" "$(jq -r .hysteria.version build/deps.json)"
