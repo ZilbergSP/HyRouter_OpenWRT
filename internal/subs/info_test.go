@@ -319,3 +319,4 @@ func TestSafeLink(t *testing.T) {
 	}
 }
 
+func frac(x float64, unit int64) int64 { return int64(x * float64(unit)) }

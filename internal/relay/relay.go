@@ -68,7 +68,7 @@ type Config struct {
 	// the device of a LAN address in them, and keys it.
 	Flows  *flows.Registry
 	Device func(mac rules.MAC, ip netip.Addr) (name, key string)
-	Log   *slog.Logger
+	Log    *slog.Logger
 }
 
 // Relay is the running relay.
