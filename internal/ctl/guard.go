@@ -42,7 +42,11 @@ func (c *Controller) Shutdown() error {
 		}
 		cancel()
 	}
-	return c.Stop()
+	err := c.Stop()
+	if ferr := c.stats.Flush(time.Now()); ferr != nil {
+		c.log.Warn("statistics not written", "err", ferr)
+	}
+	return err
 }
 
 // guardActive reports the guard's table for the status: only while not

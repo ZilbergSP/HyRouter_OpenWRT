@@ -27,6 +27,7 @@ import (
 	"github.com/zilbergsp/hyrouter/internal/dnspolicy"
 	"github.com/zilbergsp/hyrouter/internal/dnsproxy"
 	"github.com/zilbergsp/hyrouter/internal/edition"
+	"github.com/zilbergsp/hyrouter/internal/flows"
 	"github.com/zilbergsp/hyrouter/internal/groups"
 	"github.com/zilbergsp/hyrouter/internal/hysteria"
 	"github.com/zilbergsp/hyrouter/internal/kernel"
@@ -35,6 +36,7 @@ import (
 	"github.com/zilbergsp/hyrouter/internal/relay"
 	"github.com/zilbergsp/hyrouter/internal/rules"
 	"github.com/zilbergsp/hyrouter/internal/socks5"
+	"github.com/zilbergsp/hyrouter/internal/stats"
 	"github.com/zilbergsp/hyrouter/internal/store"
 	"github.com/zilbergsp/hyrouter/internal/subs"
 	"github.com/zilbergsp/hyrouter/internal/tunnels"
@@ -78,6 +80,9 @@ type Controller struct {
 	geoKick  chan bool
 	geoMu    sync.Mutex // one update of the rule database at a time
 	geoBusy  atomic.Bool
+	flows    *flows.Registry
+	devs     devices
+	stats    *stats.Collector
 
 	rules   rules.Store
 	policy  atomic.Pointer[dnspolicy.Policy]
@@ -93,8 +98,10 @@ type Controller struct {
 	lastErr string
 	since   time.Time
 	issues  []string
-	// probeStop ends the prober and the scanner of groups.
+	// probeStop ends the prober and the scanner of groups, ctStop the
+	// reader of the kernel's connections.
 	probeStop context.CancelFunc
+	ctStop    context.CancelFunc
 
 	// editMu: one edit of the settings at a time (Edit).
 	editMu sync.Mutex
@@ -126,6 +133,14 @@ func New(o Options) *Controller {
 	c.geo = newGeoCache(filepath.Join(o.Store.Dir, "geo"))
 	c.geoKick = make(chan bool, 1)
 	rules.SetGeo(c.geo)
+	keep := 300
+	if edition.Lite {
+		keep = 100
+	}
+	c.flows = flows.NewRegistry(keep)
+	c.stats = stats.New(c.log)
+	c.stats.Names = c.statsName
+	c.stats.Configure(statFiles{dir: filepath.Join(o.Store.Dir, "stats")})
 	c.route = kernel.PolicyRouting{Mark: nft.MarkTProxy, Mask: nft.MarkTProxy, Table: nft.RouteTable, Priority: nft.RulePriority}
 	c.groups = groups.NewRuntime(c.log)
 	c.tunnels = &tunnels.Manager{New: c.newRunner, Log: c.log, OnHealth: c.noteHealth, OnDial: c.groups.NoteDial}
@@ -204,6 +219,12 @@ func (c *Controller) Load() error {
 	c.mu.Unlock()
 	c.setSecrets(st.Servers)
 	c.subSecrets(st.Subs)
+	c.devs.set(st.Devices)
+	if c.stats.Mode() != statsMode(st.Settings) {
+		if err := c.stats.SetMode(time.Now(), statsMode(st.Settings)); err != nil {
+			c.log.Warn("statistics", "err", err)
+		}
+	}
 	return nil
 }
 
@@ -212,6 +233,7 @@ func (c *Controller) Load() error {
 func (c *Controller) Run(ctx context.Context) {
 	go c.runSubs(ctx)
 	go c.runGeo(ctx)
+	go c.runStats(ctx)
 	c.kickGeo()
 	<-ctx.Done()
 }
@@ -438,6 +460,8 @@ func (c *Controller) startLocked(ctx context.Context) error {
 		MAC:        c.neigh.Lookup,
 		Pick:       c.pick,
 		Limit:      edition.Current.Relay,
+		Flows:      c.flows,
+		Device:     c.devs.name,
 		Log:        c.log,
 	})
 	if err != nil {
@@ -470,6 +494,9 @@ func (c *Controller) startLocked(ctx context.Context) error {
 	}
 	c.dns.Refill()
 	c.startProber()
+	ctCtx, ctCancel := context.WithCancel(context.Background())
+	c.ctStop = ctCancel
+	go c.runConntrack(ctCtx)
 	for _, i := range cp.issues {
 		c.log.Warn(i)
 	}
@@ -497,6 +524,10 @@ func (c *Controller) stopLocked() error {
 	defer cancel()
 	var errs []error
 	c.stopProber()
+	if c.ctStop != nil {
+		c.ctStop()
+		c.ctStop = nil
+	}
 	if err := nft.Remove(ctx); err != nil {
 		errs = append(errs, err)
 	}
@@ -528,6 +559,7 @@ func (c *Controller) Apply(ctx context.Context, st store.State) error {
 	old := c.st
 	c.st = st
 	c.setSecrets(st.Servers)
+	c.devs.set(st.Devices)
 	if !c.running {
 		return nil
 	}

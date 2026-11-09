@@ -145,6 +145,58 @@ export interface GeoStatus {
   missing: string[];
 }
 
+export interface ConnView {
+  id: number;
+  process: string;
+  path: string;
+  proto: string;
+  src: string;
+  dst: string;
+  domain: string;
+  domainSrc: string;
+  rule: string;
+  route: string;
+  profile: string;
+  outcome: string;
+  group?: string;
+  failover?: boolean;
+  sent: number;
+  recv: number;
+  start: string;
+  closed: boolean;
+}
+
+export interface StatsCounters {
+  tc?: number;
+  tu?: number;
+  td?: number;
+  dc?: number;
+  du?: number;
+  bc?: number;
+  f?: number;
+  fo?: number;
+}
+
+export interface StatsRow extends StatsCounters {
+  k: string;
+  n?: string;
+  gone?: boolean;
+}
+
+export interface StatsReport {
+  period: string;
+  from: string;
+  to: string;
+  total: StatsCounters;
+  days: (StatsCounters & { day: string })[];
+  apps: StatsRow[] | null;
+  servers: StatsRow[] | null;
+  groups: StatsRow[] | null;
+  months: string[] | null;
+  mode: string;
+  storeError?: string;
+}
+
 export interface MergeStats {
   added: number;
   updated: number;

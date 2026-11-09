@@ -81,14 +81,14 @@ func TestPickTunnel(t *testing.T) {
 	sub := rules.Subject{Proto: 6, Dst: netip.MustParseAddrPort("198.51.100.1:443"), Src: netip.MustParseAddr("192.168.1.20")}
 	sub.MAC, _ = rules.ParseMAC("aa:bb:cc:dd:ee:01")
 	res := rules.Result{Action: rules.Tunnel, Profile: "grp-0123456789ab"}
-	if tun, id := r.pickTunnel(res, false, sub, ""); tun == nil || id != "srv-b" {
-		t.Errorf("TCP took %q", id)
+	if tun, picked := r.pickTunnel(res, false, sub, ""); tun == nil || picked.Profile != "srv-b" {
+		t.Errorf("TCP took %q", picked.Profile)
 	}
 	if got.App != "dev:aa:bb:cc:dd:ee:01" || got.Site != "video.example" || got.IP != sub.Dst.Addr() {
 		t.Errorf("hint %+v", got)
 	}
-	if tun, id := r.pickTunnel(res, true, sub, "www.other.example"); tun != nil || id != "" {
-		t.Errorf("UDP with no server took %q", id)
+	if tun, _ := r.pickTunnel(res, true, sub, "www.other.example"); tun != nil {
+		t.Error("UDP with no server got a tunnel")
 	}
 	if got.Site != "other.example" {
 		t.Errorf("the name in the connection is not the site: %+v", got)

@@ -286,6 +286,9 @@ func TestMergeKeepsLocalSettingsVLESS(t *testing.T) {
 	fresh, _, _ = hysteria.ParseURI(strings.NewReplacer("nl.example", "de.example", "#NL", "#DE").Replace(vlessLink))
 	list, _ = mergeSubscription([]hysteria.Profile{hy}, src, []hysteria.Profile{fresh}, none, newID)
 	if x := list[0]; x.ID != "y" || !x.IsVLESS() || x.Bandwidth.Up != "" || x.Validate() != nil {
+		t.Fatalf("%+v %v", x, x.Validate())
+	}
+}
 
 // A subscription of thousands keeps its first MaxServers, with a
 // warning: each server is kept in servers.json and merged on every update.

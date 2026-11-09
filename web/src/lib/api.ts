@@ -3,6 +3,7 @@
 
 import type {
   Device,
+  ConnView,
   EditResp,
   GeoStatus,
   Group,
@@ -13,6 +14,7 @@ import type {
   RulesConfig,
   Session,
   StateView,
+  StatsReport,
   Status,
 } from './types';
 
@@ -92,6 +94,10 @@ export const api = {
   editSub: (id: string, s: SubInput) => call<EditResp>('PUT', `/api/subs/${encodeURIComponent(id)}`, s),
   updateSub: (id: string) => call<EditResp & { stats: MergeStats }>('POST', `/api/subs/${encodeURIComponent(id)}/update`, {}),
   deleteSub: (id: string) => call<EditResp>('DELETE', `/api/subs/${encodeURIComponent(id)}`),
+  connections: () => call<{ active: ConnView[]; closed: ConnView[] }>('GET', '/api/connections'),
+  stats: (period: string) => call<StatsReport>('GET', '/api/stats?period=' + encodeURIComponent(period)),
+  setStats: (enabled: boolean) => call<EditResp>('PUT', '/api/stats', { enabled }),
+  resetStats: () => call<unknown>('POST', '/api/stats/reset', {}),
   geo: () => call<GeoStatus>('GET', '/api/geo'),
   saveGeo: (g: { source: string; auto: boolean }) => call<EditResp & { geo: GeoStatus }>('PUT', '/api/geo', g),
   updateGeo: () => call<GeoStatus>('POST', '/api/geo/update', {}),

@@ -9,6 +9,8 @@
   import Rules from './pages/Rules.svelte';
   import Devices from './pages/Devices.svelte';
   import Log from './pages/Log.svelte';
+  import Connections from './pages/Connections.svelte';
+  import Stats from './pages/Stats.svelte';
   import Settings from './pages/Settings.svelte';
 
   const pages = [
@@ -17,6 +19,8 @@
     { path: '/groups', title: 'Группы' },
     { path: '/rules', title: 'Правила' },
     { path: '/devices', title: 'Устройства' },
+    { path: '/connections', title: 'Соединения' },
+    { path: '/stats', title: 'Статистика' },
     { path: '/log', title: 'Журнал' },
     { path: '/settings', title: 'Настройки' },
   ];
@@ -131,6 +135,10 @@
           <Rules {view} onstate={(v) => (view = v)} />
         {:else if route === '/devices'}
           <Devices {view} onstate={(v) => (view = v)} />
+        {:else if route === '/connections'}
+          <Connections {view} />
+        {:else if route === '/stats'}
+          <Stats {view} onstate={(v) => (view = v)} />
         {:else if route === '/log'}
           <Log />
         {:else if route === '/settings'}

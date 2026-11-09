@@ -25,6 +25,7 @@ import (
 
 	"golang.org/x/sys/unix"
 
+	"github.com/zilbergsp/hyrouter/internal/flows"
 	"github.com/zilbergsp/hyrouter/internal/groups"
 	"github.com/zilbergsp/hyrouter/internal/rules"
 	"github.com/zilbergsp/hyrouter/internal/sniff"
@@ -63,6 +64,10 @@ type Config struct {
 	Pick func(res rules.Result, udp bool, h groups.Hint) (rules.Result, Tunnel)
 	// Limit bounds the TCP connections and UDP flows at once (0 = none).
 	Limit int
+	// Flows records the connections and flows (nil = none); Device names
+	// the device of a LAN address in them, and keys it.
+	Flows  *flows.Registry
+	Device func(mac rules.MAC, ip netip.Addr) (name, key string)
 	Log   *slog.Logger
 }
 
@@ -141,6 +146,11 @@ func (r *Relay) Close() {
 	}
 	r.mu.Unlock()
 	r.wg.Wait()
+	r.mu.Lock()
+	for _, f := range r.flows {
+		r.end(f.rec)
+	}
+	r.mu.Unlock()
 }
 
 // Active is the number of TCP connections and UDP flows under way.
@@ -256,18 +266,25 @@ func (r *Relay) byDNS(sub rules.Subject) rules.Result {
 }
 
 func (r *Relay) handleTunnel(c *net.TCPConn) {
-	sub := r.subject(6, addrPort(c.RemoteAddr()), addrPort(c.LocalAddr()))
+	src := addrPort(c.RemoteAddr())
+	sub := r.subject(6, src, addrPort(c.LocalAddr()))
+	rec := r.open(sub, src)
+	defer r.end(rec)
 	res := r.byDNS(sub)
 	if res.Action != rules.Tunnel {
 		r.log().Debug("relay: a tunnel connection the rules no longer send through a tunnel: reset", "rule", res.Rule)
+		decided(rec, res, "", rules.SrcNone, "rst: правила больше не ведут его через VPN")
 		socks5.Abort(c)
 		return
 	}
-	r.viaTunnel(c, res, sub, "", socks5.AddrFromAddrPort(sub.Dst), nil)
+	r.viaTunnel(c, rec, res, sub, "", rules.SrcNone, socks5.AddrFromAddrPort(sub.Dst), nil)
 }
 
 func (r *Relay) handleName(c *net.TCPConn) {
-	sub := r.subject(6, addrPort(c.RemoteAddr()), addrPort(c.LocalAddr()))
+	from := addrPort(c.RemoteAddr())
+	sub := r.subject(6, from, addrPort(c.LocalAddr()))
+	rec := r.open(sub, from)
+	defer r.end(rec)
 	prefix, sn := readName(c)
 	names := r.names(sub.Dst.Addr())
 	host := sn.Host
@@ -278,8 +295,9 @@ func (r *Relay) handleName(c *net.TCPConn) {
 		host = ""
 	}
 	var res rules.Result
+	src := rules.SrcNone
 	if host != "" {
-		src := rules.SrcSNI
+		src = rules.SrcSNI
 		if sn.Kind == sniff.HTTP {
 			src = rules.SrcHost
 		}
@@ -293,17 +311,20 @@ func (r *Relay) handleName(c *net.TCPConn) {
 		up, err := d.DialContext(r.ctx, "tcp", sub.Dst.String())
 		if err != nil {
 			r.log().Debug("relay: direct connection failed", "rule", res.Rule, "err", err)
+			decided(rec, res, host, src, "rst: "+err.Error())
 			socks5.Abort(c)
 			return
 		}
-		r.pipe(c, up, prefix)
+		decided(rec, res, host, src, "passed")
+		r.pipe(c, up, prefix, rec)
 	case rules.Tunnel:
 		dst := socks5.AddrFromAddrPort(sub.Dst)
 		if host != "" {
 			dst = socks5.Addr{Host: host, Port: sub.Dst.Port()}
 		}
-		r.viaTunnel(c, res, sub, host, dst, prefix)
+		r.viaTunnel(c, rec, res, sub, host, src, dst, prefix)
 	default:
+		decided(rec, res, host, src, "rst: заблокировано правилом")
 		socks5.Abort(c)
 	}
 }
@@ -331,19 +352,16 @@ func readName(c *net.TCPConn) ([]byte, sniff.Result) {
 // pickTunnel chooses the server of a connection (Config.Pick). host is
 // the name seen in the connection itself ("" = none): a group keeps one
 // site on one server by it, or by the names DNS gave the address.
-func (r *Relay) pickTunnel(res rules.Result, udp bool, sub rules.Subject, host string) (Tunnel, string) {
+func (r *Relay) pickTunnel(res rules.Result, udp bool, sub rules.Subject, host string) (Tunnel, rules.Result) {
 	if r.cfg.Pick == nil {
-		return nil, ""
+		return nil, res
 	}
 	h := groups.Hint{App: deviceKey(sub), IP: sub.Dst.Addr()}
 	if hasGroup(res) {
 		h.Site = groups.SiteOf(host, r.names(sub.Dst.Addr()))
 	}
-	res, t := r.cfg.Pick(res, udp, h)
-	if t == nil {
-		return nil, ""
-	}
-	return t, res.Profile
+	picked, t := r.cfg.Pick(res, udp, h)
+	return t, picked
 }
 
 // hasGroup reports a group anywhere in a Tunnel result's chain.
@@ -363,10 +381,11 @@ func deviceKey(sub rules.Subject) string {
 	return ""
 }
 
-func (r *Relay) viaTunnel(c *net.TCPConn, res rules.Result, sub rules.Subject, host string, dst socks5.Addr, prefix []byte) {
-	t, id := r.pickTunnel(res, false, sub, host)
+func (r *Relay) viaTunnel(c *net.TCPConn, rec *flows.Record, res rules.Result, sub rules.Subject, host string, hsrc rules.DomainSource, dst socks5.Addr, prefix []byte) {
+	t, picked := r.pickTunnel(res, false, sub, host)
 	if t == nil {
 		r.log().Info("relay: no server can carry the connection, it is refused", "rule", res.Rule, "server", res.Profile)
+		decided(rec, picked, host, hsrc, "rst: ни один сервер не может его пропустить")
 		socks5.Abort(c)
 		return
 	}
@@ -374,16 +393,18 @@ func (r *Relay) viaTunnel(c *net.TCPConn, res rules.Result, sub rules.Subject, h
 	up, err := t.Dial(ctx, dst)
 	cancel()
 	if err != nil {
-		r.log().Debug("relay: connection through the server failed", "rule", res.Rule, "server", id, "err", err)
+		r.log().Debug("relay: connection through the server failed", "rule", res.Rule, "server", picked.Profile, "err", err)
+		decided(rec, picked, host, hsrc, "rst: "+err.Error())
 		socks5.Abort(c)
 		return
 	}
-	r.pipe(c, up, prefix)
+	decided(rec, picked, host, hsrc, "passed")
+	r.pipe(c, up, prefix, rec)
 }
 
 // pipe passes prefix and then both directions until both are done; the
 // relay's Close ends it early.
-func (r *Relay) pipe(c *net.TCPConn, up net.Conn, prefix []byte) {
+func (r *Relay) pipe(c *net.TCPConn, up net.Conn, prefix []byte, rec *flows.Record) {
 	stop := context.AfterFunc(r.ctx, func() {
 		socks5.Abort(c)
 		socks5.Abort(up)
@@ -396,6 +417,9 @@ func (r *Relay) pipe(c *net.TCPConn, up net.Conn, prefix []byte) {
 			socks5.Abort(c)
 			return
 		}
+		if rec != nil {
+			rec.Sent.Add(int64(len(prefix)))
+		}
 	}
-	socks5.Pipe(c, up)
+	pipeCounted(c, up, rec)
 }

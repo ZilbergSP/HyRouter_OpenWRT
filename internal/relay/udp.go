@@ -14,6 +14,7 @@ import (
 
 	"golang.org/x/sys/unix"
 
+	"github.com/zilbergsp/hyrouter/internal/flows"
 	"github.com/zilbergsp/hyrouter/internal/rules"
 	"github.com/zilbergsp/hyrouter/internal/socks5"
 )
@@ -53,6 +54,7 @@ type flow struct {
 	conn    *net.UDPConn
 	closed  bool
 	counted bool
+	rec     *flows.Record
 }
 
 func (f *flow) touch() { f.last.Store(time.Now().UnixNano()) }
@@ -166,13 +168,18 @@ func (r *Relay) setUp(f *flow) {
 		f.mu.Unlock()
 	}
 	sub := r.subject(17, src, dst)
+	rec := r.open(sub, src)
 	res := r.byDNS(sub)
 	if res.Action != rules.Tunnel {
+		decided(rec, res, "", rules.SrcNone, "dropped: правила не ведут его через VPN")
+		r.end(rec)
 		refuse("relay: a UDP flow the rules do not send through a tunnel: dropped", "rule", res.Rule)
 		return
 	}
-	t, id := r.pickTunnel(res, true, sub, "")
+	t, picked := r.pickTunnel(res, true, sub, "")
 	if t == nil {
+		decided(rec, picked, "", rules.SrcNone, "dropped: ни один сервер не пропускает UDP")
+		r.end(rec)
 		refuse("relay: no server carries UDP for the flow: dropped", "rule", res.Rule, "server", res.Profile)
 		return
 	}
@@ -180,9 +187,12 @@ func (r *Relay) setUp(f *flow) {
 	assoc, err := t.UDPAssociate(ctx)
 	cancel()
 	if err != nil {
-		refuse("relay: UDP through the server failed", "rule", res.Rule, "server", id, "err", err)
+		decided(rec, picked, "", rules.SrcNone, "dropped: "+err.Error())
+		r.end(rec)
+		refuse("relay: UDP through the server failed", "rule", res.Rule, "server", picked.Profile, "err", err)
 		return
 	}
+	decided(rec, picked, "", rules.SrcNone, "passed")
 	network := "udp4"
 	if dst.Addr().Is6() {
 		network = "udp6"
@@ -191,6 +201,8 @@ func (r *Relay) setUp(f *flow) {
 	c, err := d.DialContext(r.ctx, network, src.String())
 	if err != nil {
 		assoc.Close()
+		decided(rec, picked, "", rules.SrcNone, "dropped: "+err.Error())
+		r.end(rec)
 		refuse("relay: the flow's socket failed", "err", err)
 		return
 	}
@@ -200,9 +212,10 @@ func (r *Relay) setUp(f *flow) {
 		f.mu.Unlock()
 		assoc.Close()
 		conn.Close()
+		r.end(rec)
 		return
 	}
-	f.assoc, f.conn, f.ready = assoc, conn, true
+	f.assoc, f.conn, f.ready, f.rec = assoc, conn, true, rec
 	queued := f.queue
 	f.queue = nil
 	f.mu.Unlock()
@@ -211,6 +224,9 @@ func (r *Relay) setUp(f *flow) {
 	for _, p := range queued {
 		if len(p) <= limit {
 			assoc.WriteTo(p, to)
+			if rec != nil {
+				rec.Sent.Add(int64(len(p)))
+			}
 		}
 	}
 	r.wg.Add(2)
@@ -226,6 +242,9 @@ func (r *Relay) setUp(f *flow) {
 			f.touch()
 			if n <= limit {
 				assoc.WriteTo(buf[:n], to)
+				if rec != nil {
+					rec.Sent.Add(int64(n))
+				}
 			}
 		}
 	}()
@@ -240,6 +259,9 @@ func (r *Relay) setUp(f *flow) {
 			}
 			f.touch()
 			conn.Write(buf[:n])
+			if rec != nil {
+				rec.Recv.Add(int64(n))
+			}
 		}
 	}()
 }
@@ -267,6 +289,7 @@ func (r *Relay) sweepLoop() {
 			f.mu.Unlock()
 			if done {
 				f.close()
+				r.end(f.rec)
 				delete(r.flows, k)
 				if f.counted {
 					r.release()
