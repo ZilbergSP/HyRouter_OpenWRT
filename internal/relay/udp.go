@@ -28,6 +28,11 @@ const (
 	// udpRefused keeps a flow the rules do not send through a tunnel, so
 	// its datagrams are dropped without deciding again each time.
 	udpRefused = 10 * time.Second
+	// clientBuf and serverBuf are a flow's buffers: Hysteria carries no
+	// datagram over socks5.MaxUDPPayload (about 4 KB) from the client, and
+	// thousands of flows must fit a small router's memory (Lite).
+	clientBuf = 8 << 10
+	serverBuf = 16 << 10
 )
 
 type flowKey struct{ src, dst netip.AddrPort }
@@ -211,7 +216,7 @@ func (r *Relay) setUp(f *flow) {
 	r.wg.Add(2)
 	go func() { // client → server
 		defer r.wg.Done()
-		buf := make([]byte, 65535)
+		buf := make([]byte, clientBuf)
 		for {
 			n, err := conn.Read(buf)
 			if err != nil {
@@ -226,7 +231,7 @@ func (r *Relay) setUp(f *flow) {
 	}()
 	go func() { // server → client
 		defer r.wg.Done()
-		buf := make([]byte, 65535)
+		buf := make([]byte, serverBuf)
 		for {
 			n, _, err := assoc.ReadFrom(buf)
 			if err != nil {

@@ -30,8 +30,9 @@ dump() {
 }
 
 cleanup() {
+	# By PID: this script's own command line names hyrouterd too.
+	if [ -n "${HYR:-}" ]; then kill "$HYR" 2>/dev/null || true; fi
 	for p in "${PIDS[@]}"; do kill "$p" 2>/dev/null || true; done
-	pkill -f "$HYROUTERD" 2>/dev/null || true
 	for ns in dev dev2 rtr net; do ip netns del "$ns" 2>/dev/null || true; done
 	rm -rf /etc/netns/dev /etc/netns/dev2
 }
