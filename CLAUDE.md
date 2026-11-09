@@ -10,9 +10,10 @@ that the firmware's rebuilds must not lose.
 Architecture and plan: docs/ARCHITECTURE.md. The users speak Russian:
 answer in Russian, UI text and docs are Russian.
 
-The repository is private. HyRoute (github.com/lardan099/hyroute, public,
-MIT) is the source of the copied packages; it is checked out next to this
-one at ../HyRoute. This repository lives in D:\Work\Projects\HyRoute_OpenWRT.
+The repository is public (since 2026-11-09): everything committed, every
+issue and every release is seen by anyone. HyRoute
+(github.com/lardan099/hyroute, public, MIT) is the source of the copied
+packages; it is checked out next to this one at ../HyRoute. This repository lives in D:\Work\Projects\HyRoute_OpenWRT.
 
 ## Workflow
 
