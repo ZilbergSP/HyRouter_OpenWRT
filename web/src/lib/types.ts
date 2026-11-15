@@ -323,6 +323,14 @@ export interface Status {
   update?: string;
 }
 
+export interface PingView {
+  running: boolean;
+  done: number;
+  total: number;
+  pending: string[];
+  results: Record<string, { ms?: number; error?: string; at: number }>;
+}
+
 export interface AvailableUpdate {
   version: string;
   notes: string;

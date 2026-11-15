@@ -185,7 +185,7 @@ func TestWriteLists(t *testing.T) {
 	if err := WriteLists(dir, nil, nil, map[Target][]string{Sites: {"cf.example"}}); err != nil {
 		t.Fatal(err)
 	}
-	if b, _ := os.ReadFile(filepath.Join(dir, ListSites)); string(b) != "# HyRoute: файл пересоздаётся\ncf.example\n" {
+	if b, _ := os.ReadFile(filepath.Join(dir, ListSites)); string(b) != "# HyRouter: файл пересоздаётся\ncf.example\n" {
 		t.Fatalf("%q", b)
 	}
 }

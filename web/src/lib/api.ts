@@ -17,6 +17,7 @@ import type {
   StateView,
   StatsReport,
   Status,
+  PingView,
   UpdatesView,
   ZapretView,
 } from './types';
@@ -121,6 +122,9 @@ export const api = {
   saveSettings: (s: { lan: string[]; dnsByRules: boolean; dnsTunnel: string; killSwitch: boolean }) =>
     call<EditResp>('PUT', '/api/settings', s),
   log: (after: number) => call<LogEntry[]>('GET', `/api/log?after=${after}`),
+  pings: () => call<PingView>('GET', '/api/servers/ping'),
+  ping: (ids: string[]) => call<PingView>('POST', '/api/servers/ping', { ids }),
+  pingStop: () => call<PingView>('POST', '/api/servers/ping/stop', {}),
   updates: () => call<UpdatesView>('GET', '/api/updates'),
   checkUpdates: () => call<UpdatesView>('POST', '/api/updates/check', {}),
   installUpdate: () => call<UpdatesView>('POST', '/api/updates/install', {}),

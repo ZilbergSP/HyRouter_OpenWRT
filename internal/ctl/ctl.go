@@ -119,6 +119,8 @@ type Controller struct {
 	zap zapretCtl
 	// upd: updates of HyRouter and of the cores (updates.go).
 	upd updatesCtl
+	// ping: «Проверить показанные» of the servers page (ping.go).
+	ping pingCtl
 	// inUse: the servers the routing runs (install).
 	inUse atomic.Pointer[[]hysteria.Profile]
 }

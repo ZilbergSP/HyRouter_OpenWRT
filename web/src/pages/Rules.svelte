@@ -117,6 +117,54 @@
     error = '';
   }
 
+  // The list: a search by name, sites, devices and server, and a compact
+  // view (a rule a line; a long list opens compact, the choice is kept in
+  // this browser). While searching the arrows are off: a move among
+  // hidden rules would surprise.
+  let query = $state('');
+  let compact = $state(readCompact());
+
+  function readCompact(): boolean {
+    try {
+      const v = localStorage.getItem('hyrouter.rules.compact');
+      if (v !== null) return v === '1';
+    } catch {
+      // no storage: the default
+    }
+    return (view.rules.rules?.length ?? 0) > 15;
+  }
+
+  function setCompact(on: boolean) {
+    compact = on;
+    try {
+      localStorage.setItem('hyrouter.rules.compact', on ? '1' : '0');
+    } catch {
+      // kept for this page only
+    }
+  }
+
+  function ruleMatches(r: Rule, q: string): boolean {
+    if (!q) return true;
+    const text = [
+      r.name,
+      actionText[r.action],
+      r.action === 'tunnel' ? serverName(r) : '',
+      deviceText(r.devices),
+      ...(r.devices ?? []),
+      ...(r.domains ?? []),
+      r.ports ?? '',
+    ]
+      .join(' ')
+      .toLowerCase();
+    return q
+      .toLowerCase()
+      .split(/\s+/)
+      .every((w) => text.includes(w));
+  }
+
+  const searching = $derived(query.trim() !== '');
+  const found = $derived(cfg.rules.filter((r) => ruleMatches(r, query.trim())).length);
+
   const blank: Rule = { name: '', action: 'tunnel' };
   // The rule the editor of a new rule starts from: blank or a template's.
   let draft = $state<{ rule: Rule; title?: string }>({ rule: blank });
@@ -250,28 +298,39 @@
   {#if cfg.rules.length === 0}
     <p class="muted">Правил пока нет: всё идёт по «Всё остальное».</p>
   {:else}
-    <ol class="list rules">
+    <div class="row tools">
+      <input class="search" type="search" bind:value={query} placeholder="Поиск: название, сайт, устройство, сервер" />
+      <button onclick={() => setCompact(!compact)}>{compact ? 'Крупно' : 'Компактно'}</button>
+    </div>
+    {#if searching}
+      <p class="muted small">Найдено правил: {found} из {cfg.rules.length}. Пока идёт поиск, стрелки порядка выключены.</p>
+    {/if}
+    <ol class="list rules" class:compact>
       {#each cfg.rules as r, i (i)}
-        <li class:off={r.enabled === false}>
+        <li class:off={r.enabled === false} hidden={!ruleMatches(r, query.trim()) && editing !== i}>
           {#if editing === i}
             <RuleEditor rule={r} {view} onsave={edited} oncancel={() => (editing = null)} />
           {:else}
-            <div class="row">
+            <div class="row line">
               <span class="num">{i + 1}</span>
-              <strong>{r.name || 'Без названия'}</strong>
+              <strong class="name" title={r.name}>{r.name || 'Без названия'}</strong>
               <span class="badge {r.action === 'direct' ? 'ok' : r.action === 'block' ? 'bad' : ''}">
                 {actionText[r.action]}{r.action === 'tunnel' ? ': ' + serverName(r) : ''}
               </span>
               <span class="spacer"></span>
               <label class="check small"><input type="checkbox" checked={r.enabled !== false} onchange={(e) => toggle(i, e.currentTarget.checked)} /> вкл.</label>
-              <button class="link" aria-label="Выше" disabled={i === 0} onclick={() => move(i, -1)}>↑</button>
-              <button class="link" aria-label="Ниже" disabled={i === cfg.rules.length - 1} onclick={() => move(i, 1)}>↓</button>
+              <button class="link" aria-label="Выше" disabled={searching || i === 0} onclick={() => move(i, -1)}>↑</button>
+              <button class="link" aria-label="Ниже" disabled={searching || i === cfg.rules.length - 1} onclick={() => move(i, 1)}
+                >↓</button
+              >
               <button class="link" disabled={editing !== null} onclick={() => (editing = i)}>Изменить</button>
               <button class="link danger" onclick={() => remove(i)}>Удалить</button>
             </div>
-            <div class="muted small summary">
-              {deviceText(r.devices)} · {sitesText(r.domains)}{portsText(r) ? ' · ' + portsText(r) : ''}
-            </div>
+            {#if !compact}
+              <div class="muted small summary">
+                {deviceText(r.devices)} · {sitesText(r.domains)}{portsText(r) ? ' · ' + portsText(r) : ''}
+              </div>
+            {/if}
           {/if}
         </li>
       {/each}
@@ -327,6 +386,34 @@
   }
   .rules li.off {
     opacity: 0.55;
+  }
+  .tools {
+    margin-top: 10px;
+  }
+  .search {
+    flex: 1;
+    min-width: 180px;
+    width: auto;
+  }
+  .name {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+  .rules.compact > li {
+    padding: 6px 0;
+  }
+  .rules.compact .line {
+    flex-wrap: nowrap;
+  }
+  .rules.compact .name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .rules.compact .badge {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 40%;
   }
   .num {
     display: inline-grid;
