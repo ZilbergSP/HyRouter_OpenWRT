@@ -34,6 +34,7 @@ HyRouter — версия [HyRoute](https://github.com/lardan099/HyRoute) для
 | Серверы: пинг всех, одной подписки или найденных одной кнопкой, список по пингу; поиск и компактный вид серверов и правил | v0.7.0 |
 | Обход DPI как в HyRoute 1.3.34: видео YouTube по кластерам серверов, метод «сейчас» на плитке, рецепты Flowseal и kinlay0 | v0.7.0 |
 | Telegram без VPN для всей сети: соединения Telegram идут через WebSocket веб-версии (порт tg-ws-proxy), запасные пути — Cloudflare, VPN, напрямую | v0.7.0 |
+| Hysteria встроена и в обычную редакцию (без отдельного ядра на 21 МБ); VLESS — модуль, скачивается кнопкой в «Настройки → Модули» | v0.7.0 |
 
 ## Две редакции
 
@@ -44,9 +45,9 @@ HyRouter — версия [HyRoute](https://github.com/lardan099/HyRoute) для
 | Для каких роутеров | современные на aarch64 (MediaTek MT7981/MT7986, Qualcomm IPQ60xx/IPQ807x), x86_64 | слабые и старые: MIPS MediaTek MT7621, ARMv7 Qualcomm IPQ40xx |
 | Например | Xiaomi AX3000T, Cudy WR3000, GL.iNet MT3000 | Xiaomi R3G, Xiaomi 4A Gigabit, Linksys EA6350, GL.iNet B1300 |
 | Память | от 256 МБ RAM | 256 МБ RAM; на 128 МБ — с оговорками |
-| Место | от 64 МБ свободно (флеш или USB) | от 16 МБ свободно |
+| Место | от 16 МБ свободно; модуль VLESS — ещё около 32 МБ (или временное хранилище) | от 16 МБ свободно |
 | Протоколы | Hysteria 2 и VLESS | Hysteria 2 |
-| Ядро | отдельный процесс `hysteria` (или `xray`) на сервер, скачивается при первом включении | клиент Hysteria внутри `hyrouterd` |
+| Ядро | клиент Hysteria внутри `hyrouterd`; для VLESS — модуль Xray, отдельный процесс на сервер | клиент Hysteria внутри `hyrouterd` |
 | Ограничения | — | кэш DNS 10 000 записей, до 3 работающих серверов группы, до 500 серверов из подписки, память демона ограничена |
 | Пакет | `hyrouter` | `hyrouter-lite` |
 | Архитектуры пакетов | `aarch64_cortex-a53`, `aarch64_cortex-a72`, `aarch64_generic`, `x86_64` | `mipsel_24kc`, `arm_cortex-a7_neon-vfpv4`, `arm_cortex-a7`, `arm_cortex-a9`, `arm_cortex-a15_neon-vfpv4` |
@@ -85,7 +86,7 @@ HyRouter — версия [HyRoute](https://github.com/lardan099/HyRoute) для
 
 4. Откройте `http://192.168.1.1:8088` (адрес вашего роутера) и войдите паролем root. Добавьте сервер по ссылке или подписку, назовите устройства, задайте правила и нажмите «Включить».
 
-Обычная редакция скачивает ядро Hysteria 2 (и Xray для VLESS) с GitHub при первом включении и сверяет по SHA-256. Lite ничего не скачивает: клиент Hysteria встроен. `nfqws2` для обхода DPI входит в пакеты обеих редакций.
+Клиент Hysteria 2 встроен в `hyrouterd` обеих редакций: ничего скачивать не нужно. Для серверов VLESS в обычной редакции есть модуль: ядро Xray скачивается кнопкой в «Настройки → Модули» с GitHub и сверяется по SHA-256. Если на флеше нет места, оно хранится во временном хранилище и после перезагрузки скачивается заново. `nfqws2` для обхода DPI входит в пакеты обеих редакций.
 
 **Обновление.** Раз в сутки роутер проверяет новую версию HyRouter, а «Главная» о ней сообщает. Поставить её можно кнопкой «Обновить» в «Настройки → Обновления» или командой `hyrouterd -update` по SSH. Пакет для вашей редакции и архитектуры скачивается с GitHub, сверяется с `SHA256SUMS` выпуска и ставится через `opkg` или `apk`. Служба при этом перезапускается, и примерно полминуты сеть остаётся без интернета; настройки сохраняются. Там же обновляются ядра Hysteria и Xray обычной редакции.
 
@@ -145,7 +146,7 @@ internal/ipt        то же на iptables и ipset для Кинетика: ц
 internal/platform   отличия OpenWrt и KeeneticOS: пути, DNS роутера, устройства, WAN, вход
 internal/relay      TPROXY: TCP и UDP через сервер или группу, чтение SNI и Host, записи соединений
 internal/dnsd       DNS перед dnsmasq, адреса сайтов в наборы правил
-internal/hycore     клиент Hysteria 2 внутри hyrouterd (HyRouter Lite)
+internal/hycore     клиент Hysteria 2 внутри hyrouterd (обе редакции)
 internal/subs       загрузка и разбор подписок, слияние серверов
 internal/web        API веб-интерфейса, вход паролем root
 internal/…          правила, группы, geodata, статистика, обход DPI (многие — из HyRoute)
@@ -162,4 +163,4 @@ docs/               архитектура, сверка с HyRoute, замет�
 
 ## Сторонний код
 
-HyRoute (MIT), zapret2 (MIT), ядро Hysteria 2 (MIT, библиотекой в Lite) и библиотеки Go; их лицензии — в [THIRD-PARTY-NOTICES.txt](THIRD-PARTY-NOTICES.txt). Обычная редакция скачивает ядра Hysteria 2 (MIT) и Xray-core (MPL-2.0) с официальных страниц выпусков и сверяет SHA-256 из `build/deps.json`.
+HyRoute (MIT), zapret2 (MIT), ядро Hysteria 2 (MIT, библиотекой внутри hyrouterd) и библиотеки Go; их лицензии — в [THIRD-PARTY-NOTICES.txt](THIRD-PARTY-NOTICES.txt). Модуль VLESS обычной редакции скачивает Xray-core (MPL-2.0) с официальной страницы выпусков и сверяет SHA-256 из `build/deps.json`.

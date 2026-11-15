@@ -2,22 +2,10 @@
 
 package ctl
 
-import (
-	"github.com/apernet/hysteria/core/v2/client"
+import "github.com/apernet/hysteria/core/v2/client"
 
-	"github.com/zilbergsp/hyrouter/internal/hycore"
-	"github.com/zilbergsp/hyrouter/internal/hysteria"
-	"github.com/zilbergsp/hyrouter/internal/tunnels"
-)
-
-// embedded runs a Hysteria 2 server inside hyrouterd: HyRouter Lite has
-// no hysteria process (hycore).
-func (c *Controller) embedded(p hysteria.Profile, h tunnels.Hooks) tunnels.Runner {
-	if p.IsVLESS() {
-		return nil
-	}
-	return &hycore.Runner{Profile: p, Hooks: h, Log: c.log, Tune: smallWindows}
-}
+// tuneQUIC: Lite bounds the QUIC windows of its servers.
+var tuneQUIC = smallWindows
 
 // smallWindows bounds what QUIC buffers per server: Hysteria's defaults
 // (8 MB a stream, 20 MB a connection) would fill a Lite router's memory
@@ -38,6 +26,3 @@ func smallWindows(c *client.Config) {
 		}
 	}
 }
-
-// needsCore: Lite downloads no core.
-func needsCore(hysteria.Profile) bool { return false }

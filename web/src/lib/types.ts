@@ -357,6 +357,20 @@ export interface TelegramView {
   workers: string[];
 }
 
+export interface ModuleView {
+  id: string;
+  title: string;
+  hint: string;
+  installed: boolean;
+  version: string;
+  ram?: boolean;
+  size?: number;
+  available: boolean;
+  busy: boolean;
+  error?: string;
+  servers: number;
+}
+
 export interface PingView {
   running: boolean;
   done: number;

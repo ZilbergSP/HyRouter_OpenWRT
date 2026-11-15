@@ -226,10 +226,13 @@ func (in *Installer) updated(name, pinned string) (p string, again *entry) {
 // refetch downloads again an update kept in RAM that a reboot took and
 // checks it as it was installed.
 func (in *Installer) refetch(ctx context.Context, name string, e entry) (string, error) {
-	in.mu.Lock()
-	defer in.mu.Unlock()
+	in.fetch.Lock()
+	defer in.fetch.Unlock()
 	dst := in.entryPath(name, &e)
-	if in.verified(dst, e.SHA256) {
+	in.mu.Lock()
+	ok := in.verified(dst, e.SHA256)
+	in.mu.Unlock()
+	if ok {
 		return dst, nil // another start fetched it meanwhile
 	}
 	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {

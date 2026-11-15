@@ -10,8 +10,10 @@
 #
 #   sudo test/netns.sh HYROUTERD HYSTERIA HYSTERIA_VERSION
 #
-# With HYROUTER_EMBEDDED=1 (HyRouter Lite) the router gets no hysteria
-# binary: its client runs inside hyrouterd, and HYSTERIA is the server only.
+# The router gets no hysteria binary in either edition: the Hysteria client
+# runs inside hyrouterd (since 0.7.0), and HYSTERIA is the server only; a
+# hyrouterd that tried to download a core would fail here (no internet).
+# HYROUTER_EMBEDDED=1 marks the Lite run.
 #
 # With HYROUTER_PLATFORM=keenetic (a build with -tags keenetic) the router
 # is a KeeneticOS one: iptables and ipset (legacy, as Entware's) instead of
@@ -191,9 +193,7 @@ ip netns exec rtr dnsmasq --keep-in-foreground --no-resolv --no-hosts --bind-int
 PIDS+=($!)
 mkdir -p "$W/etc" "$CORES"
 rm -f "$CORES"/hysteria-*
-if [ "${HYROUTER_EMBEDDED:-0}" != 1 ]; then
-	install -m 0755 "$HYSTERIA" "$CORES/hysteria-${HYVERSION//\//-}"
-fi
+echo "the Hysteria server: $HYVERSION; the router's client is inside hyrouterd"
 cat >"$W/etc/settings.json" <<'EOF'
 {"enabled": true, "lan": ["br-lan"], "main": "srv-ci", "dns": {"byRules": false}}
 EOF

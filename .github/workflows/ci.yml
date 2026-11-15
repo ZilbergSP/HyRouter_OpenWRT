@@ -168,8 +168,8 @@ jobs:
           sudo apt-get install -y -qq nftables dnsmasq-base >/dev/null
       - name: Routing in network namespaces
         run: sudo bash test/netns.sh "$RUNNER_TEMP/hyrouterd" "$RUNNER_TEMP/hysteria" "$(jq -r .hysteria.version build/deps.json)"
-      # HyRouter Lite: the same checks with the Hysteria client inside
-      # hyrouterd (internal/hycore) and no hysteria binary on the router.
+      # HyRouter Lite: the same checks with Lite's smaller QUIC windows
+      # (both editions run the Hysteria client inside hyrouterd).
       - name: Routing in network namespaces, HyRouter Lite
         if: ${{ !cancelled() }}
         run: |

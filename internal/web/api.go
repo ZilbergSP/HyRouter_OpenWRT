@@ -145,6 +145,9 @@ func (s *Server) handleAddServer(w http.ResponseWriter, r *http.Request) {
 	if warnings == nil {
 		warnings = []string{}
 	}
+	if p.IsVLESS() && !s.Ctl.ModuleInstalled("vless") {
+		warnings = append(warnings, "серверу VLESS нужен модуль VLESS: скачайте его в «Настройки → Модули», до этого сервер не работает")
+	}
 	s.edit(w, r, func(st *store.State) error {
 		for _, e := range st.Servers {
 			if hysteria.SameConnection(e, p) {

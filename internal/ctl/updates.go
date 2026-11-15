@@ -94,13 +94,13 @@ type CoreView struct {
 	Failed     bool          `json:"failed,omitempty"`
 }
 
-// coreNames are the cores this edition downloads and updates: none in
-// Lite (Hysteria is inside hyrouterd, and VLESS is not there).
-func coreNames() []string {
-	if edition.Lite {
+// coreNames are the cores that update: Xray, when the VLESS module is
+// installed (Hysteria is inside hyrouterd; Lite has no VLESS).
+func (c *Controller) coreNames() []string {
+	if !edition.Current.VLESS || !c.cores.Installed(cores.Xray) {
 		return nil
 	}
-	return []string{cores.Hysteria, cores.Xray}
+	return []string{cores.Xray}
 }
 
 // coreOf is the core a server runs on.
@@ -153,12 +153,12 @@ func (u *updatesCtl) core(name string) *coreUpd {
 func (c *Controller) Updates() UpdatesView {
 	u := &c.upd
 	r := selfupdate.ReadResult(c.version)
-	v := UpdatesView{Version: c.version, Dev: isDev(c.version), Embedded: edition.Lite, Cores: []CoreView{}}
+	v := UpdatesView{Version: c.version, Dev: isDev(c.version), Embedded: true, Cores: []CoreView{}}
 	if in, err := c.installed(); err == nil {
 		v.Package = fmt.Sprintf("%s %s (%s, %s)", in.Package, in.Version, in.Arch, in.Manager)
 	}
 	infos := map[string]cores.Info{}
-	for _, name := range coreNames() {
+	for _, name := range c.coreNames() {
 		infos[name] = c.cores.Info(name)
 	}
 	u.mu.Lock()
@@ -174,7 +174,7 @@ func (c *Controller) Updates() UpdatesView {
 	}
 	v.Checked, v.Checking, v.Error, v.Update = u.checked, u.checking, u.err, u.app
 	v.Stage, v.Progress, v.InstallError, v.Result = u.stage, u.progress, u.instErr, u.result
-	for _, name := range coreNames() {
+	for _, name := range c.coreNames() {
 		cu := u.core(name)
 		v.Cores = append(v.Cores, CoreView{Info: infos[name], Update: cu.update, CheckError: cu.err, Busy: cu.busy,
 			Progress: cu.progress, Note: cu.note, Failed: cu.failed})
@@ -219,7 +219,7 @@ func (c *Controller) CheckUpdates(ctx context.Context) {
 		err string
 	}
 	checks := map[string]coreCheck{}
-	for _, name := range coreNames() {
+	for _, name := range c.coreNames() {
 		up, ok, err := c.cores.Check(ctx, cl, name)
 		switch {
 		case err != nil:
@@ -300,7 +300,7 @@ func (c *Controller) InstallUpdate() error {
 // the servers on it; when the ones that were connected do not connect
 // again within coreSettle, the core is rolled back.
 func (c *Controller) InstallCore(name string) error {
-	if !slices.Contains(coreNames(), name) {
+	if !slices.Contains(c.coreNames(), name) {
 		return fmt.Errorf("ядро %s здесь не обновляется", name)
 	}
 	u := &c.upd
@@ -352,7 +352,7 @@ func (c *Controller) InstallCore(name string) error {
 // RollbackCore returns a core to the one it replaced and restarts the
 // servers on it.
 func (c *Controller) RollbackCore(name string) error {
-	if !slices.Contains(coreNames(), name) {
+	if !slices.Contains(c.coreNames(), name) {
 		return fmt.Errorf("ядро %s здесь не обновляется", name)
 	}
 	u := &c.upd

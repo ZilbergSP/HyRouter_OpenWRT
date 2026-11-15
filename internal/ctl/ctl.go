@@ -48,11 +48,8 @@ import (
 const (
 	RunDir   = "/tmp/hyrouter/run"
 	CoresDir = platform.ShareDir + "/bin"
-	// SpareCoresDir keeps the cores in RAM when the flash has too little
-	// room (HyRouter Lite).
-	SpareCoresDir = "/tmp/hyrouter/bin"
-	// CoreUpdatesDir: updates of the cores are downloaded and tried in RAM,
-	// and stay there when the flash has no room for them.
+	// CoreUpdatesDir: cores (the VLESS module, updates) are downloaded and
+	// tried in RAM, and stay there when the flash has no room for them.
 	CoreUpdatesDir = "/tmp/hyrouter/cores"
 )
 
@@ -124,6 +121,8 @@ type Controller struct {
 	ping pingCtl
 	// tg: «Telegram без VPN» (tgws.go).
 	tg tgCtl
+	// mods: «Настройки → Модули» (modules.go).
+	mods modCtl
 	// inUse: the servers the routing runs (install).
 	inUse atomic.Pointer[[]hysteria.Profile]
 }
@@ -144,9 +143,9 @@ func New(o Options) *Controller {
 	if c.redactor == nil {
 		c.redactor = &logx.Redactor{}
 	}
-	if edition.Lite {
-		c.cores.Spare = SpareCoresDir
-	}
+	// Hysteria runs inside hyrouterd since 0.7.0: the cores of earlier
+	// versions free the flash.
+	c.cores.Drop(cores.Hysteria)
 	c.cache.MaxEntries = edition.Current.DNSCache
 	subs.MaxServers = edition.Current.SubServers
 	c.geo = newGeoCache(filepath.Join(o.Store.Dir, "geo"))
@@ -497,18 +496,7 @@ func (c *Controller) startLocked(ctx context.Context) error {
 		return err
 	}
 	// The cores of the servers in use, before any traffic waits for them.
-	for _, p := range cp.profiles {
-		if !needsCore(p) {
-			continue
-		}
-		name := cores.Hysteria
-		if p.IsVLESS() {
-			name = cores.Xray
-		}
-		if _, err := c.cores.Path(ctx, name); err != nil {
-			return err
-		}
-	}
+	c.fetchCores(ctx, cp)
 	c.install(cp)
 	s := c.st.Settings
 	if c.sets, err = fwOpenSets(); err != nil {
@@ -648,18 +636,7 @@ func (c *Controller) Apply(ctx context.Context, st store.State) error {
 	if err != nil {
 		return err
 	}
-	for _, p := range cp.profiles {
-		if !needsCore(p) {
-			continue
-		}
-		name := cores.Hysteria
-		if p.IsVLESS() {
-			name = cores.Xray
-		}
-		if _, err := c.cores.Path(ctx, name); err != nil {
-			return err
-		}
-	}
+	c.fetchCores(ctx, cp)
 	c.install(cp)
 	if err := c.load(ctx, cp); err != nil {
 		return err

@@ -4,6 +4,7 @@
   import Geo from './Geo.svelte';
   import Backup from './Backup.svelte';
   import Updates from './Updates.svelte';
+  import Modules from './Modules.svelte';
 
   let {
     view,
@@ -94,6 +95,8 @@
   {#if saved}<div class="notice ok">Настройки сохранены.</div>{/if}
   <button class="primary" type="submit" disabled={busy}>{busy ? 'Сохраняю…' : 'Сохранить'}</button>
 </form>
+
+<Modules />
 
 <Updates />
 

@@ -19,7 +19,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -38,10 +37,6 @@ const (
 
 // maxSize bounds a download and a core's file.
 const maxSize = 64 << 20
-
-// needRoom is the free space Dir must have for a download; with less the
-// core goes to Spare (a zip and the core taken out of it).
-const needRoom = 48 << 20
 
 // Asset is one file of a core's release for one architecture.
 type Asset struct {
@@ -93,8 +88,12 @@ type Installer struct {
 	// has no room for it ("" = Dir).
 	Staging string
 
+	// fetch: one download of a pinned core or an update kept in RAM at a
+	// time; mu guards the state and is never held across a download.
+	fetch   sync.Mutex
 	mu      sync.Mutex
 	updates map[string]*coreState // updates.json (updates.go)
+	modules map[string]bool       // modules.json (modules.go)
 	hashOK  map[string]string     // path|mtime|size → its checked SHA-256
 }
 
@@ -119,6 +118,9 @@ func (in *Installer) Path(ctx context.Context, name string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	if !in.Installed(name) {
+		return "", ErrNotInstalled
+	}
 	in.mu.Lock()
 	p, again := in.updated(name, c.Version)
 	in.mu.Unlock()
@@ -135,40 +137,71 @@ func (in *Installer) Path(ctx context.Context, name string) (string, error) {
 	return in.install(ctx, name, c)
 }
 
+// install returns the pinned core's file: the one on the flash (Dir) or
+// in RAM when it is there, else it is downloaded and checked in RAM
+// (ramDir) and goes to the flash when the flash has its size and 1 MB, or
+// stays in RAM (and is downloaded again after a reboot). A zip and the
+// core taken out of it never meet on the flash.
 func (in *Installer) install(ctx context.Context, name string, c Core) (string, error) {
-	arch := in.Arch
-	if arch == "" {
-		arch = runtime.GOARCH
-	}
-	a, ok := c.Assets[arch]
+	a, ok := c.Assets[in.arch()]
 	if !ok {
-		return "", fmt.Errorf("%s нет для процессора этого роутера (%s)", name, arch)
+		return "", fmt.Errorf("%s нет для процессора этого роутера (%s)", name, in.arch())
 	}
-	file := name + "-" + strings.ReplaceAll(c.Version, "/", "-")
+	file := fileName(name, c.Version)
+	in.fetch.Lock()
+	defer in.fetch.Unlock()
+	if p := in.pinnedFile(file); p != "" {
+		return p, nil
+	}
+	stage := in.ramDir()
+	if err := os.MkdirAll(stage, 0o755); err != nil {
+		return "", err
+	}
+	p := filepath.Join(stage, file)
+	if err := in.download(ctx, a, p); err != nil {
+		return "", fmt.Errorf("не удалось скачать %s %s: %w", name, c.Version, err)
+	}
+	if stage != in.Dir {
+		if fi, err := os.Stat(p); err == nil && freeSpace(in.Dir) >= fi.Size()+1<<20 {
+			if os.MkdirAll(in.Dir, 0o755) == nil && moveFile(p, filepath.Join(in.Dir, file)) == nil {
+				p = filepath.Join(in.Dir, file)
+			}
+		}
+	}
 	in.mu.Lock()
 	defer in.mu.Unlock()
-	for _, dir := range []string{in.Dir, in.Spare} {
+	keep := append(in.keep(name), file)
+	prune(in.Dir, name+"-", keep...)
+	if stage != in.Dir {
+		prune(stage, name+"-", keep...)
+	}
+	return p, nil
+}
+
+// pinnedFile is a core's file present on the flash or in RAM ("": none).
+func (in *Installer) pinnedFile(file string) string {
+	for _, dir := range []string{in.Dir, in.Spare, in.Staging} {
 		if dir == "" {
 			continue
 		}
 		p := filepath.Join(dir, file)
 		if st, err := os.Stat(p); err == nil && st.Mode().IsRegular() && st.Mode()&0o111 != 0 {
-			return p, nil
+			return p
 		}
 	}
-	dir := in.Dir
-	if in.Spare != "" && freeSpace(in.Dir) < needRoom {
-		dir = in.Spare
+	return ""
+}
+
+// ramDir is where a core is downloaded and checked: Spare or Staging (RAM),
+// else Dir.
+func (in *Installer) ramDir() string {
+	switch {
+	case in.Spare != "":
+		return in.Spare
+	case in.Staging != "":
+		return in.Staging
 	}
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return "", err
-	}
-	p := filepath.Join(dir, file)
-	if err := in.download(ctx, a, p); err != nil {
-		return "", fmt.Errorf("не удалось скачать %s %s: %w", name, c.Version, err)
-	}
-	prune(dir, name+"-", append(in.keep(name), file)...)
-	return p, nil
+	return in.Dir
 }
 
 func (in *Installer) client() *http.Client {

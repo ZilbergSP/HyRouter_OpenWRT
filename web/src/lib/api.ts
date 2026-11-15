@@ -17,6 +17,7 @@ import type {
   StateView,
   StatsReport,
   Status,
+  ModuleView,
   PingView,
   UpdatesView,
   ZapretView,
@@ -124,6 +125,9 @@ export const api = {
   saveSettings: (s: { lan: string[]; dnsByRules: boolean; dnsTunnel: string; killSwitch: boolean }) =>
     call<EditResp>('PUT', '/api/settings', s),
   log: (after: number) => call<LogEntry[]>('GET', `/api/log?after=${after}`),
+  modules: () => call<ModuleView[]>('GET', '/api/modules'),
+  installModule: (id: string) => call<ModuleView[]>('POST', `/api/modules/${encodeURIComponent(id)}`, {}),
+  removeModule: (id: string) => call<ModuleView[]>('DELETE', `/api/modules/${encodeURIComponent(id)}`),
   pings: () => call<PingView>('GET', '/api/servers/ping'),
   ping: (ids: string[]) => call<PingView>('POST', '/api/servers/ping', { ids }),
   pingStop: () => call<PingView>('POST', '/api/servers/ping/stop', {}),
