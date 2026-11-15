@@ -346,6 +346,7 @@ export interface CoreView {
   version: string;
   pinned: string;
   updated: boolean;
+  ram?: boolean;
   previous?: string;
   error?: string;
   update?: CoreUpdate;

@@ -332,6 +332,9 @@ func (c *Controller) InstallCore(name string) error {
 		if err == nil {
 			note, err = c.tryCore(name, up.Version)
 		}
+		if err == nil && c.cores.Info(name).RAM {
+			note += " На флеше не хватило места: ядро хранится во временном хранилище (в оперативной памяти) и после перезагрузки роутера скачается заново."
+		}
 		if err != nil {
 			c.log.Warn("update: the core not installed", "core", name, "version", up.Version, "err", err)
 			note = err.Error()

@@ -88,6 +88,10 @@ type Installer struct {
 	// Version runs a core's "version" (hysteria.ExeVersion and
 	// XrayVersion): a downloaded update must start and name itself.
 	Version func(name, path string) (string, error)
+	// Staging is where an update of a core is downloaded, taken out of its
+	// zip and tried (RAM: /tmp), and where it stays when the flash (Dir)
+	// has no room for it ("" = Dir).
+	Staging string
 
 	mu      sync.Mutex
 	updates map[string]*coreState // updates.json (updates.go)
@@ -116,10 +120,17 @@ func (in *Installer) Path(ctx context.Context, name string) (string, error) {
 		return "", err
 	}
 	in.mu.Lock()
-	p := in.updated(name, c.Version)
+	p, again := in.updated(name, c.Version)
 	in.mu.Unlock()
 	if p != "" {
 		return p, nil
+	}
+	if again != nil {
+		// An update kept in RAM that a reboot took: downloaded again (the
+		// pinned core when that fails).
+		if p, err := in.refetch(ctx, name, *again); err == nil {
+			return p, nil
+		}
 	}
 	return in.install(ctx, name, c)
 }

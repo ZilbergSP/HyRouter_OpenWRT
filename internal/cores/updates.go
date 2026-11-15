@@ -17,6 +17,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net/url"
 	"os"
 	"path"
@@ -94,7 +95,14 @@ var dgstSHA256 = regexp.MustCompile(`(?m)^SHA2-256=\s*([0-9a-fA-F]{64})\s*$`)
 
 type entry struct {
 	Version string `json:"version"` // the release's tag: app/v2.12.4, v26.11.2
-	SHA256  string `json:"sha256"`
+	SHA256  string `json:"sha256"`  // of the core itself
+	// RAM: the core lives in Staging, as the flash had no room for it.
+	// After a reboot it is downloaded again from URL (Member of a zip),
+	// checked against Sums, and its SHA256 again.
+	RAM    bool     `json:"ram,omitempty"`
+	URL    string   `json:"url,omitempty"`
+	Member string   `json:"member,omitempty"`
+	Sums   []string `json:"sums,omitempty"`
 }
 
 // coreState: the update in use, and what a rollback returns to (nil: the
@@ -107,6 +115,34 @@ type coreState struct {
 // fileName is a core's file in Dir, pinned or downloaded.
 func fileName(name, version string) string {
 	return name + "-" + strings.ReplaceAll(version, "/", "-")
+}
+
+// stage is Staging, or Dir without one.
+func (in *Installer) stage() string {
+	if in.Staging != "" {
+		return in.Staging
+	}
+	return in.Dir
+}
+
+// entryPath is where an update's core lives.
+func (in *Installer) entryPath(name string, e *entry) string {
+	dir := in.Dir
+	if e.RAM {
+		dir = in.stage()
+	}
+	return filepath.Join(dir, fileName(name, e.Version))
+}
+
+// usable: an update's core checks out, or is one kept in RAM that a
+// reboot took and Path downloads again (in.mu held).
+func (in *Installer) usable(name string, e *entry) bool {
+	p := in.entryPath(name, e)
+	if in.verified(p, e.SHA256) {
+		return true
+	}
+	_, err := os.Stat(p)
+	return e.RAM && e.URL != "" && errors.Is(err, fs.ErrNotExist)
 }
 
 func (in *Installer) arch() string {
@@ -164,23 +200,60 @@ func (in *Installer) verified(p, want string) bool {
 }
 
 // updated is the downloaded core in use instead of the pinned one ("" =
-// none). One that a HyRouter update caught up with retires (in.mu held).
-func (in *Installer) updated(name, pinned string) string {
+// none); again is one kept in RAM that a reboot took, to download again.
+// One that a HyRouter update caught up with retires (in.mu held).
+func (in *Installer) updated(name, pinned string) (p string, again *entry) {
 	in.loadUpdates()
 	st := in.updates[name]
 	if st == nil || st.Current == nil {
-		return ""
+		return "", nil
 	}
 	if release.Compare(pinned, st.Current.Version) >= 0 {
 		delete(in.updates, name)
 		in.saveUpdates()
-		return ""
+		return "", nil
 	}
-	p := filepath.Join(in.Dir, fileName(name, st.Current.Version))
-	if !in.verified(p, st.Current.SHA256) {
-		return ""
+	e := st.Current
+	if p := in.entryPath(name, e); in.verified(p, e.SHA256) {
+		return p, nil
 	}
-	return p
+	if in.usable(name, e) {
+		return "", e
+	}
+	return "", nil
+}
+
+// refetch downloads again an update kept in RAM that a reboot took and
+// checks it as it was installed.
+func (in *Installer) refetch(ctx context.Context, name string, e entry) (string, error) {
+	in.mu.Lock()
+	defer in.mu.Unlock()
+	dst := in.entryPath(name, &e)
+	if in.verified(dst, e.SHA256) {
+		return dst, nil // another start fetched it meanwhile
+	}
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		return "", err
+	}
+	tmp := filepath.Join(filepath.Dir(dst), ".update-again-"+fileName(name, e.Version))
+	defer os.Remove(tmp)
+	c := &release.Client{HTTP: in.client(), UserAgent: "HyRouter"}
+	sum, err := c.Download(ctx, e.URL, tmp, maxSize, nil, e.Sums...)
+	if err == nil && e.Member != "" {
+		sum, err = unzipMember(tmp, e.Member, dst)
+	} else if err == nil {
+		if err = os.Chmod(tmp, 0o755); err == nil {
+			err = os.Rename(tmp, dst)
+		}
+	}
+	if err == nil && !strings.EqualFold(sum, e.SHA256) {
+		os.Remove(dst)
+		err = errors.New("скачанное заново ядро не совпадает с установленным")
+	}
+	if err != nil {
+		return "", fmt.Errorf("ядро %s %s не скачалось заново: %w", Kinds[name].Title, e.Version, err)
+	}
+	return dst, nil
 }
 
 // keep are the files of a core install must not prune: the downloaded
@@ -208,6 +281,9 @@ type Info struct {
 	// Previous is what a rollback returns to ("" = nothing).
 	Previous string `json:"previous,omitempty"`
 	Error    string `json:"error,omitempty"`
+	// RAM: the core in use lives in RAM (the flash had no room for it);
+	// after a reboot it is downloaded again.
+	RAM bool `json:"ram,omitempty"`
 }
 
 // Info describes a core.
@@ -223,12 +299,11 @@ func (in *Installer) info(name string, pinned Core) Info {
 	inf := Info{Name: name, Title: Kinds[name].Title, Version: pinned.Version, Pinned: pinned.Version}
 	in.mu.Lock()
 	defer in.mu.Unlock()
-	if p := in.updated(name, pinned.Version); p != "" {
+	if p, again := in.updated(name, pinned.Version); p != "" || again != nil {
 		st := in.updates[name]
-		inf.Version, inf.Updated = st.Current.Version, true
+		inf.Version, inf.Updated, inf.RAM = st.Current.Version, true, st.Current.RAM
 		inf.Previous = "закреплённое " + pinned.Version
-		if e := st.Previous; e != nil && release.Compare(e.Version, pinned.Version) > 0 &&
-			in.verified(filepath.Join(in.Dir, fileName(name, e.Version)), e.SHA256) {
+		if e := st.Previous; e != nil && release.Compare(e.Version, pinned.Version) > 0 && in.usable(name, e) {
 			inf.Previous = e.Version
 		}
 	} else if st := in.updates[name]; st != nil && st.Current != nil {
@@ -247,6 +322,7 @@ type Update struct {
 	asset     string
 	member    string
 	url       string
+	size      int64
 	sums      []string
 }
 
@@ -292,7 +368,7 @@ func (in *Installer) check(ctx context.Context, c *release.Client, name string, 
 		return Update{}, false, fmt.Errorf("в выпуске %s %s нет %s", k.Title, r.Tag, asset)
 	}
 	u := Update{Name: name, Version: r.Tag, Notes: r.Body, Published: r.Published, Page: r.Page,
-		asset: asset, member: pa.Member, url: a.URL, sums: k.Sums(ctx, c, r, a)}
+		asset: asset, member: pa.Member, url: a.URL, size: a.Size, sums: k.Sums(ctx, c, r, a)}
 	if len(u.sums) == 0 {
 		return Update{}, false, fmt.Errorf("у выпуска %s %s нет контрольных сумм: обновление небезопасно", k.Title, r.Tag)
 	}
@@ -321,35 +397,50 @@ func (in *Installer) install1(ctx context.Context, c *release.Client, u Update, 
 	if err := os.MkdirAll(in.Dir, 0o755); err != nil {
 		return err
 	}
-	if freeSpace(in.Dir) < needRoom {
-		return fmt.Errorf("в %s нет %d МБ для нового ядра", in.Dir, needRoom>>20)
+	// The download, its zip and the try take place in Staging (RAM): the
+	// flash takes only the core itself, when it has room for it.
+	stage := in.stage()
+	if err := os.MkdirAll(stage, 0o755); err != nil {
+		return err
+	}
+	need := u.size + 4<<20
+	if u.member != "" {
+		need = 3*u.size + 4<<20 // the zip and the core taken out of it
+	}
+	if u.size > 0 && freeSpace(stage) < need {
+		return fmt.Errorf("во временном хранилище (%s) нет %d МБ для нового ядра", stage, need>>20)
 	}
 	file := fileName(u.Name, u.Version)
-	dst := filepath.Join(in.Dir, file)
-	// Not ".download-": a pinned core's install prunes those meanwhile.
-	tmp := filepath.Join(in.Dir, ".update-"+u.asset)
+	// Not ".download-" or ".core-": a pinned core's install prunes those.
+	tmp := filepath.Join(stage, ".update-"+u.asset)
+	staged := filepath.Join(stage, ".update-core-"+file)
 	defer os.Remove(tmp)
+	defer os.Remove(staged)
 	sum, err := c.Download(ctx, u.url, tmp, maxSize, progress, u.sums...)
 	if err != nil {
 		return err
 	}
 	if u.member != "" {
-		if sum, err = unzipMember(tmp, u.member, dst); err != nil {
-			return err
-		}
-	} else if err := os.Chmod(tmp, 0o755); err != nil {
-		return err
-	} else if err := os.Rename(tmp, dst); err != nil {
+		sum, err = unzipMember(tmp, u.member, staged)
+		os.Remove(tmp)
+	} else if err = os.Chmod(tmp, 0o755); err == nil {
+		err = os.Rename(tmp, staged)
+	}
+	if err != nil {
 		return err
 	}
-	got, err := in.Version(u.Name, dst)
+	got, err := in.Version(u.Name, staged)
 	if err == nil && release.Compare(got, u.Version) != 0 {
 		err = fmt.Errorf("сообщает версию %s", got)
 	}
 	if err != nil {
-		os.Remove(dst)
 		return fmt.Errorf("новое ядро %s %s не запускается, обновление отменено: %v", Kinds[u.Name].Title, u.Version, err)
 	}
+	fi, err := os.Stat(staged)
+	if err != nil {
+		return err
+	}
+
 	in.mu.Lock()
 	defer in.mu.Unlock()
 	in.loadUpdates()
@@ -358,14 +449,96 @@ func (in *Installer) install1(ctx context.Context, c *release.Client, u Update, 
 		st = &coreState{}
 		in.updates[u.Name] = st
 	}
+	e := &entry{Version: u.Version, SHA256: sum}
+	placed := false
+	if stage != in.Dir && in.room(u.Name, fi.Size(), st, pinned) {
+		placed = moveFile(staged, in.entryPath(u.Name, e)) == nil
+	}
+	if !placed && stage != in.Dir {
+		// The flash has no room: the core stays in RAM, and a reboot
+		// downloads it again.
+		e.RAM, e.URL, e.Member, e.Sums = true, u.url, u.member, u.sums
+	}
+	if !placed {
+		if err := os.Rename(staged, in.entryPath(u.Name, e)); err != nil {
+			return err
+		}
+	}
 	old := *st
-	st.Previous, st.Current = st.Current, &entry{Version: u.Version, SHA256: sum}
+	st.Previous, st.Current = st.Current, e
 	if err := in.saveUpdates(); err != nil {
 		*st = old
-		os.Remove(dst)
+		if !in.kept(u.Name, u.Version) {
+			os.Remove(in.entryPath(u.Name, e))
+		}
 		return err
 	}
 	in.pruneUpdates(u.Name, pinned)
+	return nil
+}
+
+// kept: a version of a core is the current update or the rollback target
+// (in.mu held).
+func (in *Installer) kept(name, version string) bool {
+	st := in.updates[name]
+	return st != nil && (st.Current != nil && st.Current.Version == version || st.Previous != nil && st.Previous.Version == version)
+}
+
+// room makes room on the flash (Dir) for a new core of size bytes and
+// reports whether there is enough. The update before the current one goes
+// first (this install prunes it anyway); then, when an update is the
+// rollback target, the pinned core's file, which is downloaded again if
+// it is needed (in.mu held).
+func (in *Installer) room(name string, size int64, st *coreState, pinned string) bool {
+	need := size + 1<<20
+	if freeSpace(in.Dir) >= need {
+		return true
+	}
+	if e := st.Previous; e != nil && !e.RAM && (st.Current == nil || e.Version != st.Current.Version) {
+		os.Remove(in.entryPath(name, e))
+		if freeSpace(in.Dir) >= need {
+			return true
+		}
+	}
+	p := filepath.Join(in.Dir, fileName(name, pinned))
+	if fi, err := os.Stat(p); err == nil && st.Current != nil && freeSpace(in.Dir)+fi.Size() >= need {
+		os.Remove(p)
+		return freeSpace(in.Dir) >= need
+	}
+	return false
+}
+
+// moveFile moves a core from RAM to the flash: a copy (another file
+// system), made whole under a temporary name first.
+func moveFile(src, dst string) error {
+	if err := os.Rename(src, dst); err == nil {
+		return nil
+	}
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	part := dst + ".part"
+	out, err := os.OpenFile(part, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o755)
+	if err != nil {
+		return err
+	}
+	_, err = io.Copy(out, in)
+	if err == nil {
+		err = out.Sync()
+	}
+	if cerr := out.Close(); err == nil {
+		err = cerr
+	}
+	if err == nil {
+		err = os.Rename(part, dst)
+	}
+	if err != nil {
+		os.Remove(part)
+		return err
+	}
+	os.Remove(src)
 	return nil
 }
 
@@ -379,7 +552,7 @@ func (in *Installer) Rollback(name string) error {
 		return errors.New("используется закреплённое ядро: откатываться некуда")
 	}
 	old := *st
-	if e := st.Previous; e != nil && !in.verified(filepath.Join(in.Dir, fileName(name, e.Version)), e.SHA256) {
+	if e := st.Previous; e != nil && !in.usable(name, e) {
 		st.Previous = nil
 	}
 	st.Current, st.Previous = st.Previous, st.Current
@@ -391,9 +564,13 @@ func (in *Installer) Rollback(name string) error {
 }
 
 // pruneUpdates removes the files of a core but the pinned one and those
-// of updates.json (in.mu held).
+// of updates.json, on the flash and in RAM (in.mu held).
 func (in *Installer) pruneUpdates(name, pinned string) {
-	prune(in.Dir, name+"-", append(in.keep(name), fileName(name, pinned))...)
+	keep := append(in.keep(name), fileName(name, pinned))
+	prune(in.Dir, name+"-", keep...)
+	if in.stage() != in.Dir {
+		prune(in.stage(), name+"-", keep...)
+	}
 }
 
 // unzipMember takes member out of the zip at zipPath into dst (executable)

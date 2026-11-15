@@ -50,6 +50,9 @@ const (
 	// SpareCoresDir keeps the cores in RAM when the flash has too little
 	// room (HyRouter Lite).
 	SpareCoresDir = "/tmp/hyrouter/bin"
+	// CoreUpdatesDir: updates of the cores are downloaded and tried in RAM,
+	// and stay there when the flash has no room for them.
+	CoreUpdatesDir = "/tmp/hyrouter/cores"
 )
 
 // Options make a controller.
@@ -127,7 +130,7 @@ func New(o Options) *Controller {
 		log:      o.Log,
 		redactor: o.Redactor,
 		version:  o.Version,
-		cores:    &cores.Installer{Dir: CoresDir, Version: coreVersion},
+		cores:    &cores.Installer{Dir: CoresDir, Version: coreVersion, Staging: CoreUpdatesDir},
 		cache:    dnscache.New(),
 	}
 	if c.log == nil {

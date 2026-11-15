@@ -94,7 +94,7 @@ func TestCoreUpdate(t *testing.T) {
 		t.Fatal(err)
 	}
 	in.mu.Lock()
-	p := in.updated(Hysteria, pinned.Version)
+	p, _ := in.updated(Hysteria, pinned.Version)
 	in.mu.Unlock()
 	if p != filepath.Join(dir, "hysteria-app-v2.13.0") {
 		t.Errorf("in use: %q", p)
@@ -163,7 +163,7 @@ func TestCoreUpdate(t *testing.T) {
 	os.WriteFile(filepath.Join(dir, "hysteria-app-v2.13.0"), files["app/v2.13.0"], 0o755)
 	in.hashOK = nil
 	in.mu.Lock()
-	p = in.updated(Hysteria, "app/v2.13.0")
+	p, _ = in.updated(Hysteria, "app/v2.13.0")
 	in.mu.Unlock()
 	if p != "" {
 		t.Errorf("not retired: %q", p)
@@ -210,5 +210,102 @@ func TestXrayUpdate(t *testing.T) {
 	}
 	if strings.Join(names, " ") != "updates.json xray-v26.11.20" {
 		t.Errorf("in the folder: %v", names)
+	}
+}
+
+// A flash with no room: the update is tried in RAM and stays there; a
+// reboot that took it brings it again from its release; later, with room,
+// one goes to the flash; the pinned core makes way when an update is the
+// rollback target.
+func TestCoreUpdateSmallFlash(t *testing.T) {
+	dir, ram := t.TempDir(), t.TempDir()
+	pinnedFile := filepath.Join(dir, "hysteria-app-v2.12.3")
+	flash := func() int64 { return 0 }
+	old := freeSpace
+	freeSpace = func(d string) int64 {
+		if d == dir {
+			return flash()
+		}
+		return 1 << 30
+	}
+	t.Cleanup(func() { freeSpace = old })
+	ctx := context.Background()
+	in := &Installer{Dir: dir, Staging: ram, Arch: "test", Version: fakeVersion}
+	pinned := Core{Version: "app/v2.12.3", Assets: map[string]Asset{"test": {
+		URL: "https://example.invalid/releases/download/app%2Fv2.12.3/hysteria-linux-test", SHA256: "x"}}}
+	files := map[string][]byte{
+		"app/v2.13.0": []byte("core app/v2.13.0\n"),
+		"app/v2.14.0": []byte("core app/v2.14.0\n"),
+		"app/v2.16.0": []byte("core app/v2.16.0\n"),
+	}
+	hashes := func(tag string, b []byte) (string, []byte) {
+		return "hashes.txt", []byte(sum(b) + "  hysteria-linux-test\n")
+	}
+	install := func(tag string) {
+		t.Helper()
+		c := releases(t, "apernet/hysteria", "hysteria-linux-test", files, hashes, tag)
+		u, ok, err := in.check(ctx, c, Hysteria, pinned)
+		if err != nil || !ok {
+			t.Fatal(tag, ok, err)
+		}
+		if err := in.install1(ctx, c, u, pinned.Version, nil); err != nil {
+			t.Fatal(tag, err)
+		}
+	}
+	// A pinned core of 2 MB on the flash.
+	os.WriteFile(pinnedFile, bytes.Repeat([]byte("p"), 2<<20), 0o755)
+
+	install("app/v2.13.0")
+	if inf := in.info(Hysteria, pinned); !inf.Updated || !inf.RAM || inf.Version != "app/v2.13.0" {
+		t.Errorf("kept in RAM: %+v", inf)
+	}
+	inRAM := filepath.Join(ram, "hysteria-app-v2.13.0")
+	if _, err := os.Stat(inRAM); err != nil {
+		t.Fatal("not in RAM:", err)
+	}
+	if _, err := os.Stat(pinnedFile); err != nil {
+		t.Error("the pinned core, the rollback target, made way")
+	}
+
+	// A reboot takes it: it is downloaded again.
+	os.Remove(inRAM)
+	in.mu.Lock()
+	p, again := in.updated(Hysteria, pinned.Version)
+	in.mu.Unlock()
+	if p != "" || again == nil {
+		t.Fatalf("after the reboot: %q %v", p, again)
+	}
+	if p, err := in.refetch(ctx, Hysteria, *again); err != nil || p != inRAM {
+		t.Fatalf("refetch: %q %v", p, err)
+	}
+
+	// With room the next one goes to the flash; the one in RAM stays the
+	// rollback target.
+	flash = func() int64 { return 1 << 30 }
+	install("app/v2.14.0")
+	if inf := in.info(Hysteria, pinned); inf.RAM || inf.Version != "app/v2.14.0" || inf.Previous != "app/v2.13.0" {
+		t.Errorf("on the flash: %+v", inf)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "hysteria-app-v2.14.0")); err != nil {
+		t.Error("not on the flash:", err)
+	}
+
+	// No room while the pinned core is there: an update is the rollback
+	// target now, so the pinned core makes way.
+	flash = func() int64 {
+		if _, err := os.Stat(pinnedFile); err == nil {
+			return 0
+		}
+		return 1 << 30
+	}
+	install("app/v2.16.0")
+	if _, err := os.Stat(pinnedFile); err == nil {
+		t.Error("the pinned core stays")
+	}
+	if inf := in.info(Hysteria, pinned); inf.RAM || inf.Version != "app/v2.16.0" || inf.Previous != "app/v2.14.0" {
+		t.Errorf("after the pinned core made way: %+v", inf)
+	}
+	if _, err := os.Stat(inRAM); err == nil {
+		t.Error("the update before the previous one stays in RAM")
 	}
 }

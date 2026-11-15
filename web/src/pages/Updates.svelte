@@ -162,14 +162,20 @@
       <p class="muted small">В HyRouter Lite Hysteria встроена в hyrouterd и обновляется вместе с HyRouter.</p>
     {:else}
       <p class="muted small">
-        Новые выпуски Hysteria и Xray проверяются по контрольным суммам и пробным запуском. После установки серверы на ядре
-        перезапускаются; если те, что были подключены, не подключатся за минуту, вернётся прежнее ядро.
+        Новые выпуски Hysteria и Xray проверяются по контрольным суммам и пробным запуском во временном хранилище. На флеш
+        ядро переезжает, если там есть место, иначе остаётся во временном хранилище и скачивается заново после перезагрузки.
+        После установки серверы на ядре перезапускаются; если те, что были подключены, не подключатся за минуту, вернётся
+        прежнее ядро.
       </p>
       {#each u.cores as c (c.name)}
         <div class="core">
           <div class="row">
             <strong>{c.title} {v(c.version)}</strong>
-            <span class="muted small">{c.updated ? `обновлено, в выпуске HyRouter — ${v(c.pinned)}` : 'из выпуска HyRouter'}</span>
+            <span class="muted small"
+              >{c.updated ? `обновлено, в выпуске HyRouter — ${v(c.pinned)}` : 'из выпуска HyRouter'}{c.ram
+                ? ' · во временном хранилище: после перезагрузки скачается заново'
+                : ''}</span
+            >
             <span class="spacer"></span>
             {#if c.busy}
               <span class="small">{c.progress > 0 && c.progress < 1 ? `Скачиваю… ${pct(c.progress)}%` : 'Ставлю и проверяю…'}</span>
