@@ -45,7 +45,7 @@ func TestNFQWS2DryRun(t *testing.T) {
 	// Own sites by name and by address (documentation networks).
 	sites := []string{"example.com", "example.org", "192.0.2.0/24", "2001:db8::/32"}
 	lists := filepath.Join(dir, "lists")
-	if err := WriteLists(lists, sites, []netip.Addr{netip.MustParseAddr("192.0.2.1")}); err != nil {
+	if err := WriteLists(lists, sites, []netip.Addr{netip.MustParseAddr("192.0.2.1")}, nil); err != nil {
 		t.Fatal(err)
 	}
 

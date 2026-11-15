@@ -73,6 +73,13 @@ func zapretRefine() int {
 	return 24
 }
 
+// zapretRefineAuto: self-healing's pick tries one batch around what
+// worked (the fastest still wins, checked twice), the whole space only
+// when nothing worked.
+func zapretRefineAuto() int {
+	return min(zapretRefine(), 12)
+}
+
 func zapretBroad() int {
 	if edition.Lite {
 		return 24
@@ -96,6 +103,13 @@ type zapretCtl struct {
 	// leftovers: the nfqws2 an earlier hyrouterd left were ended (on the
 	// first apply).
 	leftovers sync.Once
+	// plans: what nfqws2 was started with (a strategy number of a
+	// zapret.Switch is a place in them); written with mu and pmu held.
+	plans map[zapret.Target]zapret.Plan
+	// video: the latest YouTube video servers the LAN looked up (names,
+	// newest first), for the checks; in memory only.
+	vmu   sync.Mutex
+	video []string
 	// args, key (the network args were built for), net (its name), wan
 	// and err (why the bypass does not run) are written with mu and pmu
 	// held.
@@ -378,7 +392,7 @@ func (c *Controller) zapretApplyLocked() {
 		return
 	}
 	os.Chmod(filepath.Dir(ZapretLists), 0o755)
-	if err := zapret.WriteLists(ZapretLists, cfg.Sites, skip); err != nil {
+	if err := zapret.WriteLists(ZapretLists, cfg.Sites, skip, nil); err != nil {
 		stop("списки не записаны: " + err.Error())
 		return
 	}
@@ -390,6 +404,9 @@ func (c *Controller) zapretApplyLocked() {
 		stop("командная строка не собрана: " + err.Error())
 		return
 	}
+	c.zap.pmu.Lock()
+	c.zap.plans = plans
+	c.zap.pmu.Unlock()
 	if slices.Equal(args, c.zap.args) && run.Status().State != zapret.Off {
 		set(args, "")
 		return
@@ -571,6 +588,24 @@ type ZapretTargetView struct {
 	PickedAt time.Time     `json:"pickedAt,omitzero"`
 	Using    string        `json:"using"`
 	Via      string        `json:"via,omitempty"`
+	// Live: what the automatic bypass uses now per host key, the latest
+	// switch first (the orchestrator's lines on nfqws2's output; empty: no
+	// connection seen yet).
+	Live []ZapretLive `json:"live,omitempty"`
+}
+
+// ZapretLive is the method the circular orchestrator uses for one host
+// key now.
+type ZapretLive struct {
+	// What: «сайт youtube.com», «серверы видео aj5go5».
+	What   string `json:"what"`
+	Method string `json:"method"` // its name
+	// Place: the method's place in the round (1: the first, as picked);
+	// Switches: how often this key moved on since nfqws2 started.
+	Place    int   `json:"place"`
+	Of       int   `json:"of"`
+	Switches int   `json:"switches"`
+	At       int64 `json:"at"` // Unix ms of the latest switch (or the first use)
 }
 
 // ZapretMethodView is a method the page offers.
@@ -631,8 +666,12 @@ func (c *Controller) ZapretInfo() ZapretView {
 	c.zap.pmu.Lock()
 	v := ZapretView{Available: zapretAvailable(), Routing: c.Running(), Settings: cfg, Network: c.zap.net,
 		WAN: slices.Clone(c.zap.wan), Error: c.zap.err, QueueNote: c.zap.queueNote}
-	args, key := c.zap.args, c.zap.key
+	args, key, plans := c.zap.args, c.zap.key, c.zap.plans
 	c.zap.pmu.Unlock()
+	var switches []zapret.Switch
+	if args != nil {
+		switches = c.zapretRunner().Switches()
+	}
 	v.Status, v.Offload = c.zapretRunner().Status(), platform.Offload(context.Background())
 	if err != nil {
 		v.Error = err.Error()
@@ -658,6 +697,9 @@ func (c *Controller) ZapretInfo() ZapretView {
 			tv.Using = "перебор методов, первый — " + zapret.MethodName(p.Methods[0])
 		default:
 			tv.Using = zapret.MethodName(p.Methods[0])
+		}
+		if args != nil {
+			tv.Live = zapretLive(t, plans[t], switches)
 		}
 		v.Targets = append(v.Targets, tv)
 	}
@@ -732,6 +774,80 @@ func fastest(ws []timed) []timed {
 	return ws
 }
 
+// zapretChecks are target t's checks (zapret.ChecksSkip) and, for
+// YouTube, the video servers the LAN looked up lately
+// (zapret.VideoChecks): the page and the redirector may open with a
+// method that does not open them.
+func (c *Controller) zapretChecks(t zapret.Target, sites, skip []string) []string {
+	out := zapret.ChecksSkip(t, sites, skip)
+	if t == zapret.YouTube {
+		c.zap.vmu.Lock()
+		video := slices.Clone(c.zap.video)
+		c.zap.vmu.Unlock()
+		out = append(out, zapret.VideoChecks(video)...)
+	}
+	return out
+}
+
+// maxVideo: the video servers kept for the checks.
+const maxVideo = 32
+
+// noteVideoServer keeps a name the DNS answered when it is a YouTube
+// video server (dnsd.Config.Answered). Memory only: statistics never
+// record sites.
+func (c *Controller) noteVideoServer(name string) {
+	if _, ok := zapret.VideoServer(name); !ok {
+		return
+	}
+	c.zap.vmu.Lock()
+	defer c.zap.vmu.Unlock()
+	v := slices.DeleteFunc(c.zap.video, func(n string) bool { return n == name })
+	c.zap.video = append([]string{name}, v[:min(len(v), maxVideo-1)]...)
+}
+
+// maxLive: host keys shown per service.
+const maxLive = 6
+
+// zapretLive is target t's part of the orchestrator's notes: per host key
+// the method it uses now, the latest switch first.
+func zapretLive(t zapret.Target, p zapret.Plan, sw []zapret.Switch) []ZapretLive {
+	type state struct {
+		last     zapret.Switch
+		switches int
+	}
+	keys := map[string]*state{}
+	for _, s := range sw {
+		if s.Target != t {
+			continue
+		}
+		st := keys[s.Key]
+		if st == nil {
+			st = &state{}
+			keys[s.Key] = st
+		}
+		st.last = s
+		if s.From > 0 {
+			st.switches++
+		}
+	}
+	out := make([]ZapretLive, 0, len(keys))
+	for k, st := range keys {
+		what := "сайт " + k
+		if cl, ok := strings.CutPrefix(k, "video:"); ok {
+			what = "серверы видео " + cl
+		}
+		m := fmt.Sprintf("метод №%d", st.last.Strategy)
+		if i := st.last.Strategy - 1; i < len(p.Methods) {
+			m = zapret.MethodName(p.Methods[i])
+		}
+		out = append(out, ZapretLive{What: what, Method: m, Place: st.last.Strategy, Of: len(p.Methods), Switches: st.switches, At: st.last.At.UnixMilli()})
+	}
+	slices.SortFunc(out, func(a, b ZapretLive) int {
+		return cmp.Or(cmp.Compare(b.At, a.At), strings.Compare(a.What, b.What))
+	})
+	return out[:min(len(out), maxLive)]
+}
+
 // checkHosts are the hosts of check addresses, each once.
 func checkHosts(urls []string) []string {
 	var out []string
@@ -795,7 +911,7 @@ func (c *Controller) zapretPickRun(why string) {
 	key := c.zap.key
 	checks := map[zapret.Target][]string{}
 	for _, t := range cfg.Targets {
-		checks[t] = zapret.Checks(t, cfg.Sites)
+		checks[t] = c.zapretChecks(t, cfg.Sites, nil)
 	}
 	check := func(slot int, urls []string) zapret.Result {
 		return (&zapret.Prober{Slot: slot}).Check(ctx, urls)
@@ -1032,12 +1148,21 @@ func (c *Controller) zapretPickRun(why string) {
 			}
 		}
 		budget := zapretRefine()
+		if why != "" {
+			budget = zapretRefineAuto()
+		}
 		if lost {
+			known := zapret.Known()
+			for _, st := range known {
+				add(st.ID())
+			}
 			for _, st := range zapret.Broad(zapretBroad(), rand.Uint64()) {
 				add(st.ID())
 			}
-			budget += zapretBroad()
+			budget = zapretRefine() + len(known) + zapretBroad()
 		}
+		// Neighbors of the fastest first, then Flowseal's and kinlay0's
+		// recipes and the spread.
 		cands = cands[:min(len(cands), budget)]
 		for len(cands) > 0 && ctx.Err() == nil && time.Now().Before(deadline) {
 			batch := cands[:min(len(cands), zapretBatch())]
@@ -1205,7 +1330,7 @@ func (c *Controller) zapretHealOnce(ctx context.Context, fails map[zapret.Target
 	}
 	key, _ := c.zapretNetKey()
 	urls := func(t zapret.Target) []string {
-		return zapret.ChecksSkip(t, cfg.Sites, cfg.Picked[key].SkippedSites)
+		return c.zapretChecks(t, cfg.Sites, cfg.Picked[key].SkippedSites)
 	}
 	check := func(slot int, t zapret.Target) zapret.Result {
 		cctx, cancel := context.WithTimeout(ctx, time.Minute)

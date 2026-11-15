@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"strings"
 )
 
@@ -59,6 +60,10 @@ type BuildConfig struct {
 	// it keeps root). On OpenWrt it is "daemon", as zapret2's own service.
 	User string
 }
+
+// quicFake: a QUIC Initial naming google.com before the real one, six
+// times as in Flowseal's presets (a lost fake leaves the real Initial bare).
+const quicFake = "--lua-desync=fake:blob=quic_google:repeats=6"
 
 // decoy is the host a hostfakesplit puts in place of the target's.
 func decoy(t Target) string {
@@ -117,15 +122,17 @@ func Build(c BuildConfig) ([]string, error) {
 		return nil, fmt.Errorf("zapret: неверное имя пользователя %q", c.User)
 	}
 	list := func(name string) string { return filepath.Join(c.Lists, name) }
-	circular := false
+	circular, ownLua := false, false
 	for t, p := range c.Plans {
 		if len(p.Methods) == 0 {
 			return nil, fmt.Errorf("zapret: нет методов для %s", t)
 		}
 		for _, id := range p.Methods {
-			if _, ok := FindMethod(id); !ok {
+			m, ok := FindMethod(id)
+			if !ok {
 				return nil, fmt.Errorf("zapret: неизвестный метод %q", id)
 			}
+			ownLua = ownLua || slices.ContainsFunc(m.tcp, func(inst string) bool { return strings.Contains(inst, "hyroute_") })
 		}
 		circular = circular || p.Circular && len(p.Methods) > 1
 	}
@@ -142,6 +149,9 @@ func Build(c BuildConfig) ([]string, error) {
 	}
 	for _, name := range []string{"google_tls", "quic_google", "vk_tls"} {
 		args = append(args, "--blob="+name+":@"+filepath.Join(c.Dir, "blobs", BlobFiles[name]))
+	}
+	if circular || ownLua {
+		args = append(args, "--lua-init=@"+list(LuaFile))
 	}
 	args = append(args, fakeArgs(c.Lists, c.Plans)...)
 	args = append(args, "--lua-gc=60")
@@ -176,14 +186,14 @@ func Build(c BuildConfig) ([]string, error) {
 			profiles = append(profiles,
 				tlsProfile(TargetName(t), t, "80,443", l7, hostlist, exclude, p),
 				[]string{"--comment=" + TargetName(t) + " QUIC", "--filter-udp=443", "--filter-l7=quic", hostlist, exclude,
-					"--payload=quic_initial", "--out-range=-d10", "--lua-desync=fake:blob=quic_google"})
+					"--payload=quic_initial", "--out-range=-d10", quicFake})
 		}
 		if nets {
 			ipset := "--ipset=" + list(ListSitesNet)
 			profiles = append(profiles,
 				tlsProfile("Свои адреса", t, "80,443", l7, ipset, exclude, p),
 				[]string{"--comment=Свои адреса QUIC", "--filter-udp=443", "--filter-l7=quic", ipset, exclude,
-					"--payload=quic_initial", "--out-range=-d10", "--lua-desync=fake:blob=quic_google"})
+					"--payload=quic_initial", "--out-range=-d10", quicFake})
 		}
 	}
 	for i, p := range profiles {
@@ -226,9 +236,16 @@ func tlsProfile(comment string, t Target, ports, l7, hostlist, exclude string, p
 		// methods only the ClientHello. nld=2: one count per domain
 		// (googlevideo.com), not per one of its hundreds of servers; own
 		// sites keep one per host (nld=2 of example.co.uk is co.uk).
-		circular := "--lua-desync=circular:fails=3:retrans=2"
+		// hyroute_circular (LuaFile): circular, telling each method it
+		// takes for a host on winws2's output (SwitchPrefix), which the
+		// page shows.
+		circular := "--lua-desync=hyroute_circular:target=" + string(t) + ":fails=3:retrans=2"
 		if t != Sites {
 			circular += ":nld=2"
+		}
+		if t == YouTube {
+			// The video servers counted per cluster (LuaFile).
+			circular += ":hostkey=hyroute_hostkey"
 		}
 		out = append(out, "--out-range=-s34228", "--in-range=-s5556", circular, "--in-range=x", payload)
 		for n, id := range p.Methods {
@@ -298,4 +315,95 @@ func CommandLine(args []string) string {
 		b.WriteString(a)
 	}
 	return b.String()
+}
+
+// LuaFile is HyRoute's own Lua for winws2 and nfqws2 (the same zapret2
+// Lua), written into the lists folder (WriteLists) and loaded with the
+// circular orchestrator or a method that calls it.
+const LuaFile = "hyroute.lua"
+
+// luaSource. hyroute_ts is the tsauto fooling (strategy.go): zapret2's
+// tcp_ts=-600000 (winws's default, as Flowseal's and kinlay0's presets use
+// it) when the packet has a timestamp option, its tcp_md5 when not.
+// hyroute_hostkey is the circular orchestrator's host key for
+// YouTube. With nld=2 every video server (rr4---sn-aj5go5-5i.googlevideo.com,
+// rr4---sn-aj5go5-5i.c.youtube.com) shared one count with the rest of its
+// domain — www.youtube.com among them — and a DPI treats them apart: the
+// page opened, each success reset the count, and a method that did not
+// open the video servers was never changed (videos stalled). They are
+// keyed by their cluster (sn-aj5go5): a provider's cache and Google's own
+// servers learn their methods apart, the servers of one cluster together.
+const luaSource = `-- HyRoute: the circular orchestrator's host key for YouTube (zapret/build.go).
+function hyroute_hostkey(desync)
+	local h = desync.track and desync.track.hostname
+	if h and not desync.track.hostname_is_ip then
+		local cluster = string.match(string.lower(h), "^rr?%d+%-%-%-sn%-(%w+)")
+		if cluster then
+			return "video:" .. cluster
+		end
+	end
+	return standard_hostkey(desync)
+end
+
+-- HyRoute: circular, each strategy it takes for a host key told on
+-- stdout, which HyRoute reads (zapret.SwitchPrefix): "HYROUTE switch, unix
+-- time, target, key, strategy, strategy before (0: first)". Not a file:
+-- winws2 lowers itself to low integrity once started and may write none.
+function hyroute_circular(ctx, desync)
+	-- Its own arguments first: running the methods, circular leaves
+	-- desync.arg as the last method's.
+	local target = desync.arg.target or ""
+	local hkf = desync.arg.hostkey and _G[desync.arg.hostkey] or standard_hostkey
+	local key = hkf(desync) or ""
+	local hrec = automate_host_record(desync)
+	local before = hrec and hrec.nstrategy
+	local verdict = circular(ctx, desync)
+	if hrec and hrec.nstrategy and hrec.nstrategy ~= before then
+		io.stdout:write("HYROUTE\tswitch\t", os.time(), "\t", target, "\t", key, "\t", hrec.nstrategy, "\t", before or 0, "\n")
+		io.stdout:flush()
+	end
+	return verdict
+end
+
+-- HyRoute: the tsauto fooling (zapret/strategy.go), as apply_fooling's tcp_ts and tcp_md5.
+function hyroute_ts(dis, fooling_options)
+	if not dis.tcp then
+		return
+	end
+	local idx = find_tcp_option(dis.tcp.options, TCP_KIND_TS)
+	if idx and (dis.tcp.options[idx].data and #dis.tcp.options[idx].data or 0) == 8 then
+		dis.tcp.options[idx].data = bu32(u32add(u32(dis.tcp.options[idx].data), -600000)) .. string.sub(dis.tcp.options[idx].data, 5)
+	elseif not find_tcp_option(dis.tcp.options, TCP_KIND_MD5) then
+		table.insert(dis.tcp.options, {kind = TCP_KIND_MD5, data = brandom(16)})
+	end
+end
+`
+
+// VideoServer reports a YouTube video server's name
+// (rr4---sn-aj5go5-5i.googlevideo.com, …c.youtube.com) and its cluster
+// (aj5go5), as hyroute_hostkey keys it.
+func VideoServer(host string) (cluster string, ok bool) {
+	h := strings.ToLower(strings.TrimSuffix(host, "."))
+	var rest string
+	switch {
+	case strings.HasSuffix(h, ".googlevideo.com"):
+		rest = strings.TrimSuffix(h, ".googlevideo.com")
+	case strings.HasSuffix(h, ".c.youtube.com"):
+		rest = strings.TrimSuffix(h, ".c.youtube.com")
+	default:
+		return "", false
+	}
+	node, sn, found := strings.Cut(rest, "---sn-")
+	if !found || strings.Contains(sn, ".") || len(node) < 2 || node[0] != 'r' {
+		return "", false
+	}
+	digits := strings.TrimPrefix(node[1:], "r")
+	if digits == "" || strings.Trim(digits, "0123456789") != "" {
+		return "", false
+	}
+	cluster, _, _ = strings.Cut(sn, "-")
+	if cluster == "" || strings.Trim(cluster, "abcdefghijklmnopqrstuvwxyz0123456789") != "" {
+		return "", false
+	}
+	return cluster, true
 }

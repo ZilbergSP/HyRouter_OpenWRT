@@ -240,7 +240,16 @@ export interface ZapretView {
   network: string;
   wan: string[];
   offload: boolean;
-  targets: { target: string; name: string; on: boolean; fixed?: string; picked?: string; using: string; via?: string }[];
+  targets: {
+    target: string;
+    name: string;
+    on: boolean;
+    fixed?: string;
+    picked?: string;
+    using: string;
+    via?: string;
+    live?: { what: string; method: string; place: number; of: number; switches: number; at: number }[];
+  }[];
   methods: { id: string; name: string }[];
   pick?: {
     running: boolean;

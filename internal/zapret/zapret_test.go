@@ -102,7 +102,9 @@ func TestBuild(t *testing.T) {
 		"zapret-auto.lua", "--blob=google_tls:@", "--blob=vk_tls:@", "--filter-l7=discord,stun",
 		// circular before the payload filter, seeing every packet; the
 		// methods only the ClientHello.
-		"--in-range=-s5556 --lua-desync=circular:fails=3:retrans=2:nld=2 --in-range=x --payload=tls_client_hello --lua-desync=",
+		"--in-range=-s5556 --lua-desync=hyroute_circular:target=discord:fails=3:retrans=2:nld=2 --in-range=x --payload=tls_client_hello --lua-desync=",
+		// The QUIC fake goes six times.
+		"--lua-desync=fake:blob=quic_google:repeats=6 ",
 		"hostfakesplit:host=discord.com:tcp_ts=-1000:tcp_md5:strategy=8", "--lua-desync=fake:blob=google_tls:tcp_ts=-1000:tcp_md5:repeats=7 ",
 	} {
 		if !strings.Contains(line+" ", want) {
@@ -124,8 +126,26 @@ func TestBuild(t *testing.T) {
 	// Own sites count failures per host: nld=2 of example.co.uk is co.uk.
 	sp, _ := Settings{Enabled: true, Targets: []Target{Sites}}.PlanFor(Sites, "")
 	sargs, err := Build(BuildConfig{Dir: dir, Lists: lists, Plans: map[Target]Plan{Sites: sp}})
-	if sl := strings.Join(sargs, " "); err != nil || strings.Contains(sl, "nld") || !strings.Contains(sl, "circular:fails=3:retrans=2 --in-range=x") {
+	if sl := strings.Join(sargs, " "); err != nil || strings.Contains(sl, "nld") || !strings.Contains(sl, "hyroute_circular:target=sites:fails=3:retrans=2 --in-range=x") {
 		t.Fatalf("%v %s", err, sl)
+	}
+	if strings.Contains(line, "Payload[0] == 0x16") || strings.Contains(line, "success_detector") {
+		t.Fatalf("inbound TCP narrowed by its bytes: %s", line)
+	}
+	// YouTube's video servers keyed by cluster: HyRoute's Lua, loaded;
+	// the other targets keep the standard key.
+	if !strings.Contains(line, "--lua-init=@"+filepath.Join(lists, LuaFile)) || strings.Contains(line, "hostkey=") {
+		t.Fatalf("%s", CommandLine(args))
+	}
+	yp, _ := Settings{Enabled: true, Targets: []Target{YouTube}}.PlanFor(YouTube, "")
+	yargs, _ := Build(BuildConfig{Dir: dir, Lists: lists, Plans: map[Target]Plan{YouTube: yp, Discord: yp}})
+	if yl := strings.Join(yargs, " "); !strings.Contains(yl, "hyroute_circular:target=youtube:fails=3:retrans=2:nld=2:hostkey=hyroute_hostkey ") || strings.Count(yl, "hostkey=") != 1 {
+		t.Fatalf("%s", CommandLine(yargs))
+	}
+	// A single method: no orchestrator, no own Lua; a tester has its queue.
+	one, _ := Build(BuildConfig{Dir: dir, Lists: lists, QNum: QNumBypass + 1, Plans: map[Target]Plan{YouTube: {Methods: []string{"fake"}}}})
+	if ol := strings.Join(one, " "); strings.Contains(ol, "circular") || strings.Contains(ol, LuaFile) || !strings.Contains(ol, "--qnum=201 ") {
+		t.Fatalf("%s", ol)
 	}
 	cl := CommandLine(args)
 	if strings.Contains(cl, "data") || !strings.Contains(cl, "--blob=google_tls:@tls_clienthello_www_google_com.bin") {
@@ -135,8 +155,12 @@ func TestBuild(t *testing.T) {
 
 func TestWriteLists(t *testing.T) {
 	dir := t.TempDir()
-	if err := WriteLists(dir, nil, []netip.Addr{netip.MustParseAddr("192.0.2.1"), netip.MustParseAddr("192.0.2.1")}); err != nil {
+	if err := WriteLists(dir, nil, []netip.Addr{netip.MustParseAddr("192.0.2.1"), netip.MustParseAddr("192.0.2.1")}, nil); err != nil {
 		t.Fatal(err)
+	}
+	if l, err := os.ReadFile(filepath.Join(dir, LuaFile)); err != nil || !strings.Contains(string(l), "function hyroute_hostkey(desync)") ||
+		!strings.Contains(string(l), "function hyroute_circular(ctx, desync)") || !strings.Contains(string(l), `io.stdout:write("HYROUTE\tswitch\t"`) {
+		t.Fatalf("%v", err)
 	}
 	b, _ := os.ReadFile(filepath.Join(dir, ListSites))
 	if !strings.Contains(string(b), "example.invalid") {
@@ -155,6 +179,22 @@ func TestWriteLists(t *testing.T) {
 	// Cloudflare site with ECH direct.
 	if slices.Contains(Domains(Discord, nil), "cloudflare-ech.com") {
 		t.Fatal("cloudflare-ech.com in Discord's rule")
+	}
+	// HyRoute's own hosts in a target's list: the sites list stops being
+	// the placeholder.
+	if err := WriteLists(dir, nil, nil, map[Target][]string{Sites: {"cf.example"}}); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(filepath.Join(dir, ListSites)); string(b) != "# HyRoute: файл пересоздаётся\ncf.example\n" {
+		t.Fatalf("%q", b)
+	}
+}
+
+func TestNormalizeWorkers(t *testing.T) {
+	got := NormalizeWorkers([]string{"https://My-Worker.User.workers.dev/apiws", "my-worker.user.workers.dev", "1.2.3.4", "10.0.0.0/8", "nodot", "",
+		"a.dev", "b.dev", "c.dev", "d.dev", "e.dev"})
+	if !slices.Equal(got, []string{"my-worker.user.workers.dev", "a.dev", "b.dev", "c.dev", "d.dev"}) {
+		t.Fatalf("%q", got)
 	}
 }
 
@@ -297,7 +337,7 @@ func TestSiteAddresses(t *testing.T) {
 	}
 	// Lists: names by name, addresses as an ipset.
 	dir := t.TempDir()
-	if err := WriteLists(dir, sites, nil); err != nil {
+	if err := WriteLists(dir, sites, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	b, _ := os.ReadFile(filepath.Join(dir, ListSites))
@@ -328,4 +368,74 @@ func TestSiteAddresses(t *testing.T) {
 	if c := Checks(Sites, []string{"1.2.3.4"}); len(c) != 0 {
 		t.Fatalf("%v", c)
 	}
+}
+
+func TestVideoServer(t *testing.T) {
+	for _, c := range []struct {
+		host, cluster string
+	}{
+		{"rr4---sn-aj5go5-5i.googlevideo.com", "aj5go5"},
+		{"rr4---sn-aj5go5-5i.c.youtube.com", "aj5go5"},
+		{"R2---SN-GVNUXAXJVH-JX3S.googlevideo.com.", "gvnuxaxjvh"},
+		{"rr12---sn-4g5e6nsz.googlevideo.com", "4g5e6nsz"},
+		{"redirector.googlevideo.com", ""},
+		{"www.youtube.com", ""},
+		{"rr4---sn-aj5go5-5i.example.com", ""},
+		{"x4---sn-aj5go5.googlevideo.com", ""},
+		{"rr---sn-aj5go5.googlevideo.com", ""},
+		{"rr4---sn-.googlevideo.com", ""},
+		{"rr4---sn-a.b.googlevideo.com", ""},
+	} {
+		cl, ok := VideoServer(c.host)
+		if cl != c.cluster || ok != (c.cluster != "") {
+			t.Errorf("%s: %q %v", c.host, cl, ok)
+		}
+	}
+	got := VideoChecks([]string{"www.youtube.com", "rr4---sn-aj5go5-5i.c.youtube.com", "rr1---sn-aj5go5-5p.googlevideo.com",
+		"R2---sn-gvnuxaxjvh-jx3s.googlevideo.com", "rr9---sn-other.googlevideo.com"})
+	if !slices.Equal(got, []string{"https://rr4---sn-aj5go5-5i.c.youtube.com/generate_204", "https://r2---sn-gvnuxaxjvh-jx3s.googlevideo.com/generate_204"}) {
+		t.Fatalf("%q", got)
+	}
+	if VideoChecks(nil) != nil {
+		t.Fatal("none seen: none")
+	}
+}
+
+func TestParseSwitch(t *testing.T) {
+	sw, ok := ParseSwitch("HYROUTE\tswitch\t1794300060\tyoutube\tvideo:aj5go5\t3\t2")
+	if !ok || sw != (Switch{At: time.Unix(1794300060, 0), Target: YouTube, Key: "video:aj5go5", Strategy: 3, From: 2}) {
+		t.Fatalf("%+v %v", sw, ok)
+	}
+	for _, l := range []string{"winws2 started", "HYROUTE\tswitch\tx\tyoutube\tk\t1\t0", "HYROUTE\tswitch\t1\tyoutube\t\t1\t0",
+		"HYROUTE\tswitch\t1\tyoutube\tk\t0\t1", "HYROUTE\tswitch\t1\tyoutube\tk\t1"} {
+		if _, ok := ParseSwitch(l); ok {
+			t.Fatalf("%q", l)
+		}
+	}
+}
+
+// The Runner keeps the orchestrator's lines apart from winws2's own, and
+// forgets them when it starts winws2 again.
+func TestRunnerSwitches(t *testing.T) {
+	outs := make(chan io.Writer, 2)
+	r := &Runner{Exe: "nfqws2", Spawn: func(_ string, _, _ []string, out io.Writer) (hysteria.Child, error) {
+		outs <- out
+		return &fakeChild{done: make(chan struct{})}, nil
+	}}
+	r.Start([]string{"a"})
+	out := <-outs
+	io.WriteString(out, "some line\nHYROUTE\tswitch\t1794300000\tyoutube\tyoutube.com\t1\t0\n")
+	deadline := time.Now().Add(5 * time.Second)
+	for len(r.Switches()) == 0 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if sw := r.Switches(); len(sw) != 1 || sw[0].Key != "youtube.com" || slices.ContainsFunc(r.Status().Lines, func(l string) bool { return strings.HasPrefix(l, "HYROUTE") }) {
+		t.Fatalf("%+v %v", sw, r.Status().Lines)
+	}
+	r.Start([]string{"b"})
+	<-outs
+	if len(r.Switches()) != 0 {
+		t.Fatal("kept over a restart")
+	}
+	r.Stop()
 }

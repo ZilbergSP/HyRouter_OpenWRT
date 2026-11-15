@@ -532,6 +532,7 @@ func (c *Controller) startLocked(ctx context.Context) error {
 		Cache:    c.cache,
 		Sets:     c.sets,
 		Log:      c.log,
+		Answered: c.noteVideoServer,
 	})
 	if err != nil {
 		return fmt.Errorf("DNS: %w", err)

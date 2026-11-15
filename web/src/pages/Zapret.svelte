@@ -99,6 +99,9 @@
     }
   }
 
+  const clock = (ms: number) => new Date(ms).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+  const times = (n: number) => (n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 10 || n % 100 >= 20) ? 'раза' : 'раз');
+
   function methodName(id: string): string {
     if (id === 'none') return 'не нужен: открывается и так';
     if (!id) return 'ничего не помогло';
@@ -163,6 +166,17 @@
               {/if}
             </div>
             {#if t.using}<div class="muted small">Сейчас: {t.using}</div>{/if}
+            {#if t.live?.length}
+              <div class="muted small live">
+                {#each t.live as l (l.what)}
+                  <span
+                    >{l.what}: «{l.method}»{l.place > 1 ? ` — ${l.place}-й из ${l.of}` : ''}{l.switches
+                      ? `, переключался ${l.switches} ${times(l.switches)}, последний в ${clock(l.at)}`
+                      : ''}</span
+                  >
+                {/each}
+              </div>
+            {/if}
           {/if}
         </div>
       {/each}
@@ -272,6 +286,11 @@
     background: var(--panel-2);
     display: grid;
     gap: 6px;
+  }
+  .live {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
   }
   .auto {
     width: auto;

@@ -20,6 +20,7 @@ import (
 	"net/netip"
 	"slices"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -70,6 +71,10 @@ type Config struct {
 	Cache    *dnscache.Cache
 	Sets     SetWriter
 	Log      *slog.Logger
+	// Answered is told the name of each answer learned (nil: nobody): the
+	// DPI bypass keeps the latest YouTube video servers in memory for its
+	// checks.
+	Answered func(name string)
 }
 
 type elemKey struct {
@@ -381,6 +386,20 @@ func answerAddrs(msg []byte) (out []addrTTL) {
 	}
 }
 
+// questionName is the name a query asks for, lower case without the
+// final dot ("" when it does not parse).
+func questionName(msg []byte) string {
+	var p dnsmessage.Parser
+	if _, err := p.Start(msg); err != nil {
+		return ""
+	}
+	q, err := p.Question()
+	if err != nil {
+		return ""
+	}
+	return strings.ToLower(strings.TrimSuffix(q.Name.String(), "."))
+}
+
 // Learn records the answer to query in the DNS cache and puts its
 // addresses into the sets of the rules their names match.
 func (s *Server) Learn(query, answer []byte) {
@@ -389,6 +408,11 @@ func (s *Server) Learn(query, answer []byte) {
 	}
 	if _, err := s.cfg.Cache.AddAnswerFor(query, answer); err != nil {
 		return
+	}
+	if s.cfg.Answered != nil {
+		if n := questionName(query); n != "" {
+			s.cfg.Answered(n)
+		}
 	}
 	addrs := answerAddrs(answer)
 	if len(addrs) == 0 {

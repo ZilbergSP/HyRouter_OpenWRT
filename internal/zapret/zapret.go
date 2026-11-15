@@ -16,6 +16,7 @@
 package zapret
 
 import (
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"net"
@@ -120,6 +121,11 @@ var Methods = []Method{
 	{ID: "hostfakesplit-vk", Name: "Фейк vk.com + подмена имени на vk.com", tcp: []string{
 		"fake:blob=vk_tls:tcp_ts=-1000:tcp_md5:repeats=6",
 		"hostfakesplit:host=vk.com:tcp_ts=-1000:tcp_md5"}},
+	// Flowseal's zapret-discord-youtube for Google's names (list-google:
+	// googlevideo.com, youtube.com…): one split with a google.com overlap,
+	// the parts with IP ID 0 (--ip-id=zero there; Windows fills it in).
+	{ID: "seqovl-google", Name: "Разрез с перекрытием под google.com, IP ID 0 (как у Flowseal)", tcp: []string{
+		"multisplit:pos=1:seqovl=681:seqovl_pattern=google_tls:ip_id=zero"}},
 }
 
 // FindMethod is a method by ID.
@@ -162,6 +168,9 @@ type Settings struct {
 	// before 1.3.23); ViaRules: by the user's own rules (the bypass keeps
 	// no rule for it); else a server or group ID.
 	Via map[Target]string `json:"via,omitempty"`
+	// Telegram: «Telegram без VPN», a local MTProto proxy that carries
+	// Telegram over WebSocket (internal/tgws). Apart from winws2.
+	Telegram TelegramSettings `json:"telegram,omitzero"`
 	// AutoHeal: HyRouter checks the services through the running bypass
 	// and picks again by itself when one stops opening, or on a network
 	// with no pick yet. nil = on.
@@ -187,6 +196,37 @@ const (
 	MaxSites   = 500
 	MaxNetKeys = 32
 )
+
+// TelegramSettings: the local proxy for Telegram.
+type TelegramSettings struct {
+	Enabled bool   `json:"enabled"`
+	Port    int    `json:"port,omitempty"`   // 0 = DefaultTelegramPort
+	Secret  string `json:"secret,omitempty"` // 32 hex digits; HyRoute makes one
+	// NoCloudflare: no route through tg-ws-proxy's Cloudflare domains
+	// (on by default). Workers: the user's Cloudflare Workers (hosts).
+	NoCloudflare bool     `json:"noCloudflare,omitempty"`
+	Workers      []string `json:"workers,omitempty"`
+}
+
+// MaxWorkers: Cloudflare Workers kept.
+const MaxWorkers = 5
+
+// Equal reports the same settings.
+func (t TelegramSettings) Equal(o TelegramSettings) bool {
+	return t.Enabled == o.Enabled && t.Port == o.Port && t.Secret == o.Secret &&
+		t.NoCloudflare == o.NoCloudflare && slices.Equal(t.Workers, o.Workers)
+}
+
+// DefaultTelegramPort is tg-ws-proxy's port.
+const DefaultTelegramPort = 1443
+
+// TelegramPort is the port in use.
+func (t TelegramSettings) TelegramPort() int {
+	if t.Port == 0 {
+		return DefaultTelegramPort
+	}
+	return t.Port
+}
 
 // Heals reports that HyRouter looks after the bypass by itself (AutoHeal).
 func (s Settings) Heals() bool { return s.AutoHeal == nil || *s.AutoHeal }
@@ -217,6 +257,13 @@ func (s *Settings) Normalize() {
 			delete(s.Methods, t)
 		}
 	}
+	if s.Telegram.Port != 0 && (s.Telegram.Port < 1024 || s.Telegram.Port > 65535) {
+		s.Telegram.Port = 0
+	}
+	if b, err := hex.DecodeString(s.Telegram.Secret); err != nil || len(b) != 16 {
+		s.Telegram.Secret = "" // made again
+	}
+	s.Telegram.Workers = NormalizeWorkers(s.Telegram.Workers)
 	for t, v := range s.Via {
 		if s.Methods[t] != VPN || v == "" || len(v) > 128 {
 			delete(s.Via, t)
@@ -288,6 +335,26 @@ func NormalizeSite(s string) string {
 		return ""
 	}
 	return s
+}
+
+// NormalizeWorkers: the Cloudflare Workers' hosts as typed (a URL is
+// cut to its host), names only, each once, at most MaxWorkers.
+func NormalizeWorkers(in []string) []string {
+	var out []string
+	for _, w := range in {
+		h := NormalizeSite(w)
+		if h == "" || strings.ContainsRune(h, '/') || !strings.Contains(h, ".") {
+			continue
+		}
+		if _, err := netip.ParseAddr(h); err == nil || slices.Contains(out, h) {
+			continue
+		}
+		out = append(out, h)
+		if len(out) == MaxWorkers {
+			break
+		}
+	}
+	return out
 }
 
 // siteNet reads an address or network entry, canonical: the network

@@ -52,7 +52,10 @@ func Domains(t Target, sites []string) []string {
 // domains and HyRouter's server addresses, which every profile skips. A
 // file whose content is unchanged is left alone (nfqws2 rereads a list
 // when it changes).
-func WriteLists(dir string, sites []string, servers []netip.Addr) error {
+//
+// extra adds hosts to a target's list (HyRouter's own: the Cloudflare
+// domains of «Telegram без VPN»). LuaFile is written next to the lists.
+func WriteLists(dir string, sites []string, servers []netip.Addr, extra map[Target][]string) error {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
@@ -66,8 +69,8 @@ func WriteLists(dir string, sites []string, servers []netip.Addr) error {
 	ips = slices.Compact(ips)
 	files := map[string][]string{
 		ListYouTube:  youTubeDomains,
-		ListDiscord:  append(slices.Clone(discordDomains), discordECH...),
-		ListSites:    SiteNames(sites),
+		ListDiscord:  slices.Concat(discordDomains, discordECH, extra[Discord]),
+		ListSites:    slices.Concat(SiteNames(sites), extra[Sites]),
 		ListSitesNet: SiteNets(sites),
 		ListExcluded: ips,
 	}
@@ -80,6 +83,9 @@ func WriteLists(dir string, sites []string, servers []netip.Addr) error {
 		if err := writeIfChanged(filepath.Join(dir, name), body); err != nil {
 			return err
 		}
+	}
+	if err := writeIfChanged(filepath.Join(dir, LuaFile), []byte(luaSource)); err != nil {
+		return err
 	}
 	// The generator's fakes live next to the lists.
 	return WriteFakes(dir)

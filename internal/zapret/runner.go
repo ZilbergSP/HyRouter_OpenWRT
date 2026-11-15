@@ -31,6 +31,7 @@ type Runner struct {
 	lastErr  string
 	restarts int
 	lines    []string // the last lines nfqws2 wrote
+	switches []Switch // the orchestrator's (SwitchPrefix)
 }
 
 // Runner states.
@@ -76,7 +77,7 @@ func (r *Runner) Start(args []string) {
 	gen := r.gen
 	old, done := r.child, r.exited
 	r.child, r.exited = nil, nil
-	r.restarts, r.lastErr, r.lines = 0, "", nil
+	r.restarts, r.lastErr, r.lines, r.switches = 0, "", nil, nil
 	r.mu.Unlock()
 	kill(old, done)
 	go r.supervise(gen, args)
@@ -193,6 +194,17 @@ func exitReason(err error, lines []string) string {
 }
 
 func (r *Runner) line(gen uint64, l string) {
+	if sw, ok := ParseSwitch(l); ok {
+		r.mu.Lock()
+		if r.gen == gen {
+			r.switches = append(r.switches, sw)
+			if len(r.switches) > keepSwitches {
+				r.switches = r.switches[len(r.switches)-keepSwitches:]
+			}
+		}
+		r.mu.Unlock()
+		return
+	}
 	r.mu.Lock()
 	if r.gen == gen {
 		r.lines = append(r.lines, l)
