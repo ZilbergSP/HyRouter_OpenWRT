@@ -292,7 +292,7 @@ func (c *Controller) SaveTelegram(ctx context.Context, in TelegramInput) error {
 	if len(workers) > zapret.MaxWorkers {
 		return fmt.Errorf("Worker'ов — не больше %d", zapret.MaxWorkers)
 	}
-	return c.Edit(ctx, func(st *store.State) error {
+	err := c.Edit(ctx, func(st *store.State) error {
 		cfg, err := zapretSettings(*st)
 		if err != nil {
 			cfg = zapret.Settings{}
@@ -306,5 +306,14 @@ func (c *Controller) SaveTelegram(ctx context.Context, in TelegramInput) error {
 		}
 		st.Zapret = b
 		return nil
+	}, func(st store.State) error {
+		if err := c.store.SaveZapret(st.Zapret); err != nil {
+			return err
+		}
+		return c.store.SaveRules(st.Rules)
 	})
+	if err == nil {
+		go c.zapretApply() // the bridge follows the switch
+	}
+	return err
 }
