@@ -114,6 +114,8 @@ export const api = {
     via: Record<string, string>;
     autoHeal: boolean;
   }) => call<EditResp & { zapret: ZapretView }>('PUT', '/api/zapret', z),
+  saveTelegram: (t: { enabled: boolean; cloudflare: boolean; workers: string[] }) =>
+    call<EditResp & { zapret: ZapretView }>('PUT', '/api/zapret/telegram', t),
   zapretPick: () => call<ZapretView>('POST', '/api/zapret/pick', {}),
   zapretPickCancel: () => call<ZapretView>('POST', '/api/zapret/pick/cancel', {}),
   geo: () => call<GeoStatus>('GET', '/api/geo'),

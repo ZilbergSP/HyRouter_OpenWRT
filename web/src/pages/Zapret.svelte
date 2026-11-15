@@ -2,6 +2,7 @@
   import { onMount } from 'svelte';
   import { api, errorText } from '../lib/api';
   import TargetSelect from '../lib/TargetSelect.svelte';
+  import Telegram from './Telegram.svelte';
   import type { StateView, ZapretView } from '../lib/types';
 
   let { view, onstate }: { view: StateView; onstate: (v: StateView) => void } = $props();
@@ -253,6 +254,14 @@
     {/if}
     {#if z.healNote}<p class="small">Самопроверка: {z.healNote}</p>{/if}
   </div>
+
+  <Telegram
+    {z}
+    onsaved={(r) => {
+      onstate(r.state);
+      z = r.zapret;
+    }}
+  />
 
   <div class="card">
     <div class="row">

@@ -15,6 +15,7 @@ import (
 	"github.com/zilbergsp/hyrouter/internal/groups"
 	"github.com/zilbergsp/hyrouter/internal/stats"
 	"github.com/zilbergsp/hyrouter/internal/store"
+	"github.com/zilbergsp/hyrouter/internal/tgws"
 )
 
 // Statistics (docs/ARCHITECTURE.md, «Статистика»): the traffic and
@@ -99,6 +100,9 @@ func (f statFiles) SweepTemp(before time.Time) (int, error) {
 
 // statsName is a server's or group's name for the statistics.
 func (c *Controller) statsName(id string) string {
+	if id == tgws.ProfileID {
+		return "Telegram без VPN"
+	}
 	st := c.State()
 	if groups.IsGroupID(id) {
 		if g := st.Groups.Find(id); g != nil {

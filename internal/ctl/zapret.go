@@ -342,6 +342,11 @@ func (c *Controller) zapretApplyLocked() {
 		run.Stop()
 		c.setZapretExtra("")
 	}
+	// «Telegram без VPN» follows its own switch; its Cloudflare route goes
+	// before the VPN once it is known whether nfqws2 carries its hosts.
+	c.tgApplyLocked(cfg)
+	covered := false
+	defer func() { c.tgCloudflareLocked(covered) }()
 	switch {
 	case err != nil:
 		stop(err.Error())
@@ -392,7 +397,8 @@ func (c *Controller) zapretApplyLocked() {
 		return
 	}
 	os.Chmod(filepath.Dir(ZapretLists), 0o755)
-	if err := zapret.WriteLists(ZapretLists, cfg.Sites, skip, nil); err != nil {
+	cfLists := c.tgCloudflareLists(cfg, plans)
+	if err := zapret.WriteLists(ZapretLists, cfg.Sites, skip, cfLists); err != nil {
 		stop("списки не записаны: " + err.Error())
 		return
 	}
@@ -407,6 +413,7 @@ func (c *Controller) zapretApplyLocked() {
 	c.zap.pmu.Lock()
 	c.zap.plans = plans
 	c.zap.pmu.Unlock()
+	covered = cfLists != nil
 	if slices.Equal(args, c.zap.args) && run.Status().State != zapret.Off {
 		set(args, "")
 		return
@@ -434,11 +441,22 @@ func (c *Controller) zapretStop() {
 	if c.zap.run != nil {
 		c.zap.run.Stop()
 	}
+	// Without c.mu, which the caller holds (zap.mu goes first).
+	go c.tgStop()
 }
 
 // zapretRules are the rules the bypass keeps for cfg: its services go
-// direct (or through the server chosen for them).
+// direct (or through the server chosen for them), and Telegram to its
+// bridge when «Telegram без VPN» is on (apart from nfqws2's switch).
 func zapretRules(cfg zapret.Settings) []rules.Rule {
+	out := zapretTargetRules(cfg)
+	if cfg.Telegram.Enabled {
+		out = append(out, telegramRule())
+	}
+	return out
+}
+
+func zapretTargetRules(cfg zapret.Settings) []rules.Rule {
 	if !cfg.Enabled {
 		return nil
 	}
@@ -649,6 +667,7 @@ type ZapretView struct {
 	Status      zapret.Status      `json:"status"`
 	Error       string             `json:"error,omitempty"`
 	QueueNote   string             `json:"queueNote,omitempty"`
+	Telegram    TelegramView       `json:"telegram"`
 	Network     string             `json:"network"`
 	WAN         []string           `json:"wan"`
 	Offload     bool               `json:"offload"`
@@ -665,7 +684,7 @@ func (c *Controller) ZapretInfo() ZapretView {
 	cfg, err := zapretSettings(c.State())
 	c.zap.pmu.Lock()
 	v := ZapretView{Available: zapretAvailable(), Routing: c.Running(), Settings: cfg, Network: c.zap.net,
-		WAN: slices.Clone(c.zap.wan), Error: c.zap.err, QueueNote: c.zap.queueNote}
+		WAN: slices.Clone(c.zap.wan), Error: c.zap.err, QueueNote: c.zap.queueNote, Telegram: c.telegramView(cfg)}
 	args, key, plans := c.zap.args, c.zap.key, c.zap.plans
 	c.zap.pmu.Unlock()
 	var switches []zapret.Switch

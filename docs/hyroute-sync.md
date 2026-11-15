@@ -27,6 +27,7 @@ internal/<пакет>`, перенести нужное, поправить в �
 | `socks5` | 01032d2 | + `Server.UDP` и `UDPSession` (только HyRouter): UDP-ассоциации через сессии встроенного клиента Hysteria (`internal/hycore`) |
 | `stats` | 01032d2 | как есть; в разрезе «программа» — устройство (`Record.Process`/`Path` из `ctl/conns.go`) |
 | `subfmt` | 01032d2 | как есть |
+| `tgws` | b38e8e9 | как есть (порт tg-ws-proxy); User-Agent списка Cloudflare — HyRouter. Без прокси MTProto на порту: роутер перехватывает Telegram прозрачно, через relay (`ctl/tgws.go`) |
 | `tunnels` | 01032d2 | как есть |
 | `vless` | 01032d2 | как есть |
 | `subs` | 01032d2 | из `internal/app` HyRoute: `links.go`, `merge.go`, `subinfo.go` (без предупреждений и ссылки поддержки контроллера) и загрузка, разбор и маски из `subs.go` (`fetch.go`, без снимков для отката) |

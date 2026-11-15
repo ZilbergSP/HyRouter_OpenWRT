@@ -7,6 +7,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/zilbergsp/hyrouter/internal/rules"
+	"github.com/zilbergsp/hyrouter/internal/store"
+	"github.com/zilbergsp/hyrouter/internal/tgws"
 	"github.com/zilbergsp/hyrouter/internal/zapret"
 )
 
@@ -33,5 +36,33 @@ func TestQueueNote(t *testing.T) {
 	}
 	if n := queueNote(zapret.QNumBypass, 205, "неизвестная программа"); strings.Contains(n, "взял очереди") {
 		t.Errorf("every range taken, yet: %q", n)
+	}
+}
+
+// «Telegram без VPN»: its rule comes with the switch, whether the DPI
+// bypass is on or not, and names the bridge, which is no server to run.
+func TestTelegramRule(t *testing.T) {
+	if rs := zapretRules(zapret.Settings{Telegram: zapret.TelegramSettings{Enabled: true}}); len(rs) != 1 || rs[0].Profile != tgws.ProfileID {
+		t.Fatalf("%+v", rs)
+	}
+	if rs := zapretRules(zapret.Settings{}); len(rs) != 0 {
+		t.Fatalf("off: %+v", rs)
+	}
+	st := store.Defaults()
+	st.Servers = append(st.Servers, server("srv-main"))
+	st.Settings.Main = "srv-main"
+	st.Rules = rules.Config{DefaultAction: rules.Direct, Rules: []rules.Rule{telegramRule()}}
+	cp, err := compile(st, nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, is := range cp.issues {
+		if strings.Contains(is, tgws.ProfileID) {
+			t.Errorf("issue: %s", is)
+		}
+	}
+	// The fallback (the main server) runs; the bridge is not a core.
+	if len(cp.profiles) != 1 || cp.profiles[0].ID != "srv-main" {
+		t.Errorf("profiles: %+v", cp.profiles)
 	}
 }

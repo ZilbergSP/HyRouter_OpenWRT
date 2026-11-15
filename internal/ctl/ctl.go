@@ -40,6 +40,7 @@ import (
 	"github.com/zilbergsp/hyrouter/internal/stats"
 	"github.com/zilbergsp/hyrouter/internal/store"
 	"github.com/zilbergsp/hyrouter/internal/subs"
+	"github.com/zilbergsp/hyrouter/internal/tgws"
 	"github.com/zilbergsp/hyrouter/internal/tunnels"
 )
 
@@ -121,6 +122,8 @@ type Controller struct {
 	upd updatesCtl
 	// ping: «Проверить показанные» of the servers page (ping.go).
 	ping pingCtl
+	// tg: «Telegram без VPN» (tgws.go).
+	tg tgCtl
 	// inUse: the servers the routing runs (install).
 	inUse atomic.Pointer[[]hysteria.Profile]
 }
@@ -347,6 +350,9 @@ func compile(st store.State, run func(groups.Group) []string, extra string) (*co
 		}
 	}
 	for _, id := range set.Profiles() {
+		if id == tgws.ProfileID {
+			continue // «Telegram без VPN»: the bridge, no server
+		}
 		if !groups.IsGroupID(id) {
 			addServer(id)
 			continue

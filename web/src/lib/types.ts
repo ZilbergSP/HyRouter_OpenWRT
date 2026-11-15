@@ -237,6 +237,7 @@ export interface ZapretView {
   status: { state: string; error?: string; restarts: number; lines: string[] };
   error?: string;
   queueNote?: string;
+  telegram: TelegramView;
   network: string;
   wan: string[];
   offload: boolean;
@@ -321,6 +322,39 @@ export interface Status {
   relay: number;
   guard: boolean;
   update?: string;
+}
+
+export interface TelegramView {
+  enabled: boolean;
+  running: boolean;
+  stats: {
+    active: number;
+    total: number;
+    bad: number;
+    failed: number;
+    routes: Record<string, number> | null;
+    up: number;
+    down: number;
+    lastRoute: string;
+    lastError?: string;
+    mediaOff?: number[] | null;
+  };
+  health?: {
+    at: string;
+    ws: boolean;
+    wsRoute?: string;
+    wsMillis?: number;
+    wsError?: string;
+    cf?: boolean;
+    cfRoute?: string;
+    cfMillis?: number;
+    cfError?: string;
+    fallback?: string;
+    fallbackError?: string;
+  };
+  cloudflare: boolean;
+  cloudflareFirst: boolean;
+  workers: string[];
 }
 
 export interface PingView {

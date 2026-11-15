@@ -25,6 +25,20 @@ func (s *Server) handleSaveZapret(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"state": s.view(s.Ctl.State()), "zapret": s.Ctl.ZapretInfo()})
 }
 
+// handleSaveTelegram turns «Telegram без VPN» on or off.
+func (s *Server) handleSaveTelegram(w http.ResponseWriter, r *http.Request) {
+	var in ctl.TelegramInput
+	if err := readJSON(r, &in); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := s.Ctl.SaveTelegram(r.Context(), in); err != nil {
+		s.editError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"state": s.view(s.Ctl.State()), "zapret": s.Ctl.ZapretInfo()})
+}
+
 func (s *Server) handleZapretPick(w http.ResponseWriter, r *http.Request) {
 	if err := s.Ctl.ZapretPick(); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())

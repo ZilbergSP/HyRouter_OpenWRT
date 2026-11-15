@@ -109,6 +109,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/restore/undo", s.authed(s.handleUndo))
 	mux.HandleFunc("GET /api/zapret", s.authed(s.handleZapret))
 	mux.HandleFunc("PUT /api/zapret", s.authed(s.handleSaveZapret))
+	mux.HandleFunc("PUT /api/zapret/telegram", s.authed(s.handleSaveTelegram))
 	mux.HandleFunc("POST /api/zapret/pick", s.authed(s.handleZapretPick))
 	mux.HandleFunc("POST /api/zapret/pick/cancel", s.authed(s.handleZapretCancel))
 	mux.HandleFunc("GET /api/geo", s.authed(s.handleGeo))

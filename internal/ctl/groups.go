@@ -17,6 +17,7 @@ import (
 	"github.com/zilbergsp/hyrouter/internal/rules"
 	"github.com/zilbergsp/hyrouter/internal/socks5"
 	"github.com/zilbergsp/hyrouter/internal/store"
+	"github.com/zilbergsp/hyrouter/internal/tgws"
 )
 
 // Server groups and fallbacks (docs/ARCHITECTURE.md, «Группы и запасные
@@ -135,6 +136,9 @@ func (c *Controller) chosenLocked(gid string, all []string) []string {
 // usable reports whether a server runs and can carry a connection now.
 func (c *Controller) usable(udp bool) func(string) bool {
 	return func(id string) bool {
+		if id == tgws.ProfileID {
+			return !udp && c.tg.live.Load() != nil
+		}
 		ep := c.tunnels.Get(id)
 		if ep == nil {
 			return false
@@ -165,6 +169,13 @@ func (c *Controller) pick(res rules.Result, udp bool, h groups.Hint) (rules.Resu
 		// Nothing of the chain was usable and its first target is a group.
 		c.groups.NoteRejected(res.Profile)
 		return res, nil
+	}
+	if res.Profile == tgws.ProfileID {
+		// «Telegram без VPN»: the bridge, TCP only.
+		if udp || c.tg.live.Load() == nil {
+			return res, nil
+		}
+		return res, tgTunnel{c}
 	}
 	ep := c.tunnels.Get(res.Profile)
 	if ep == nil {
